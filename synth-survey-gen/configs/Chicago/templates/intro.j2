@@ -1,0 +1,29 @@
+{#
+Age/gender
+#}
+{{'You are a'|wspace + AGEP|wspace + ' year old'}}
+{%- if AGEP|int < 18-%}
+    {{'teenager'|wspace}}
+{%- elif AGEP|int >=18 -%}
+    {%- if SEX == 'Male' -%}
+    {{'man'|wspace}}
+    {%- elif SEX == 'Female'  -%}
+    {{'woman'|wspace}}
+    {%- endif -%}
+{%- endif -%}
+{# Ancestry #}
+{%- if (ANC1P in ['Not reported']) or (ANC1P == "MISSING") -%}
+{{''}}
+{%- else -%}
+{{' of' + ANC1P|wspace + ' ancestry'}}
+{%- endif -%}
+{#
+Residence in Illinois
+#}
+{{"that lives in"|wspace}}
+{%- set location = PUMA|random_s(mapper=ploc) -%}
+{%- if PUMA | random_s(mapper=ploc) == "RANDOM_SELECT_MISSING" -%}
+    {{"the Chicago metropolitan area of Illinois. "|wspace}}
+{%- else -%}
+    {{PUMA|random_s(mapper=ploc)|wspace+", Illinois. "}}
+{%- endif -%}

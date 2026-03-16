@@ -1,0 +1,51 @@
+{#
+
+CHICAGO US
+
+System Message Template for synthetic survey generation
+https://github.com/isalva2/synth-survey-gen
+
+pretend your describing yourself to a new person
+
+#TODO
+add a randomizer to includes
+#}
+{% if not shuffle %}
+    {% include 'intro.j2' %}
+
+    {#
+    Birth and citizenship
+    #}
+    {% include 'birth.j2' %}
+
+    {#
+    Relationship status
+    #}
+    {% include 'relationship.j2' %}
+
+    {#
+    Occupation - Student, Employee, Military and economic
+    #}
+    {% include 'occupation.j2' %}
+
+    {#
+    Insurance
+    #}
+    {% include 'health.j2'%}
+
+{% else %}
+    {% set sections = ['intro.j2', 'residence.j2', 'birth.j2', 'relationship.j2', 'occupation.j2'] %}
+    {% for section in sections|randomize_includes %}
+        {% include section %}
+    {% endfor %}
+
+{% endif %}
+
+{#
+check
+#}
+{% if verbose_debug %}
+{% for key, value in _all_args.items() %}
+{{ key }}: {{ value }}
+{% endfor %}
+{% endif %}

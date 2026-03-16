@@ -1,0 +1,41 @@
+{#
+Health
+#}
+{%- if HINS1 == "Yes" -%}
+    {{'You have insurance through an employer'}}
+{%- elif HINS2 == "Yes" -%}
+    {{'You have insurance purchased directly from an insurance company'}}
+{%- elif HINS3 == "Yes" -%}
+    {{'You have Medicare'}}
+{%- elif HINS4 == "Yes" -%}
+    {{'You have Medicaid'}}
+{%- elif HINS5 == "Yes" -%}
+    {{'You have TRICARE of other military health care'}}
+{%- elif HINS6 == "Yes" -%}
+    {{'You have VA health coverage'}}
+{%- elif HINS7 == "Yes" -%}
+    {{'You have Indian Health Service'}}
+{%- else-%}
+    {{'You do not currently have insurance'}}
+{%- endif -%}
+{# Difficulties/Disabilities #}
+{%- set DISB = [] -%}
+{%- if DDRS == 'Yes' -%}
+    {% do DISB.append(DDRS_desc[:-11] | desentence) -%}
+{%- elif DEAR == 'Yes' -%}
+    {% do DISB.append(DEAR_desc[:-11] | desentence) -%}
+{%- elif DEYE == 'Yes' -%}
+    {% do DISB.append(DEYE_desc[:-11] | desentence) -%}
+{%- elif DOUT == 'Yes' -%}
+    {% do DISB.append(DOUT_desc[:-11] | desentence) -%}
+{%- elif DPHY == 'Yes' -%}
+    {% do DISB.append(DPHY_desc[:-11] | desentence) -%}
+{%- elif DREM == 'Yes' -%}
+    {% do DISB.append(DREM_desc[:-11] | desentence) -%}
+{%- endif -%}
+{%- if DISB|length == 1 -%}
+    {{'and have'|wspace + DISB[0]|wspace + 'difficulties'|wspace}}
+{%- elif DISB|length > 1 -%}
+    {{'and have'|wspace + DISB|listify + 'difficulties'|wspace}}
+{% endif -%}
+{{'.'}}

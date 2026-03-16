@@ -1,0 +1,69 @@
+{#
+
+Family
+
+#}
+{{' '}}
+{%- if 'vivant seule' in SFM -%}
+    {{'Tu vis seul'}}
+{%- elif 'Une famille principale monoparentale' in SFM -%}
+    {{'Tu es un parent célibataire'}}
+    {%- if "sans isolé" in SFM -%}
+        {{'qui vit avec tes'|wspace + NENFR[:9]|wspace}}
+    {%- else -%}
+        {%- set NO_ISOLE = (NPERR[0]|int if NPERR[0].isdigit() else 1 - 1)|string -%}
+        {{'qui vit avec'|wspace + NO_ISOLE|wspace + 'membres de ta famille'|wspace}}
+    {%- endif -%}
+
+{%- elif 'Famille principale un couple sans isolé' in SFM -%}
+    {%- if 'Marié(e)' in STAT_CONJ -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_mariage|wspace}}
+    {%- else -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_couple|wspace}}
+    {%- endif -%}
+    {%- if 'sans enfant' in SFM -%}
+        {{''}}
+    {%- else -%}
+        {%- set NO_ENFANT = SFM[45:54] -%}
+        {{'et tes'|wspace + NO_ENFANT|wspace}}
+    {%- endif -%}
+{%- elif 'Famille principale un couple sans enfant avec' in SFM -%}
+    {%- if 'Marié(e)' in STAT_CONJ -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_mariage|wspace}}
+    {%- else -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_couple|wspace}}
+    {%- endif -%}
+    {%- set NO_ISOLE = (NPERR[0]|int if NPERR[0].isdigit() else 2 - 2)|string -%}
+    {{'et'|wspace + NO_ISOLE|wspace + 'autre(s) membre(s) de ta famille'|wspace}}
+{%- elif 'Famille principale un couple avec enfant' in SFM -%}
+    {%- if 'Marié(e)' in STAT_CONJ -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_mariage|wspace}}
+    {%- else -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_couple|wspace}}
+    {%- endif -%}
+    {%- if 'sans enfant' in SFM -%}
+        {{''}}
+    {%- else -%}
+        {%- set NO_ENFANT = NENFR[:8] -%}
+        {{', tes'|wspace + NO_ENFANT}} {# fix this eventually #}
+    {%- endif -%}
+    {%- set calc = NPERR[0]|int - 2 - NO_ENFANT[0]|int -%}
+    {%- set NO_ISOLES = 1 if calc == 0 else calc -%}
+    {{'et'|wspace + NO_ISOLES|string|wspace + 'autre(s) membre(s) de ta famille'|wspace}}
+{%- elif 'Deux familles avec' in SFM -%}
+    {%- if 'Marié(e)' in STAT_CONJ -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_mariage|wspace}}
+    {%- else -%}
+        {{'Tu vis avec ton' + SEXE|SEXE_couple|wspace}}
+    {%- endif -%}
+    {%- set NO_ENFANT = NENFR[:8] -%}
+    {%- if NO_ENFANT[0]|int == 0 -%}
+        {{''}}
+    {%- else -%}
+        {{', tes' + NO_ENFANT|wspace}}
+    {%- endif -%}
+    {{'et une autre famille'|wspace}}
+{%- else -%}
+    {{"Tu vis avec d'autres personnes"}}
+{%- endif -%}
+{{'.'}}

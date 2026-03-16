@@ -1,0 +1,32 @@
+{#
+
+LYON FR
+
+System Message Template for synthetic survey generation
+https://github.com/isalva2/synth-survey-gen
+#}
+
+{# check #}
+
+{% if not shuffle %}
+    {% include 'intro_tu.j2' %}
+
+    {% include 'residence_tu.j2' %}
+
+    {% include 'family_tu.j2' %}
+
+    {% include 'occupation_tu.j2' %}
+
+{% else %}
+    {% set sections = ['intro_tu.j2', 'residence_tu.j2', 'family_tu.j2', 'occupation_tu.j2'] %}
+    {% for section in sections|randomize_includes %}
+        {% include section %}
+    {% endfor %}
+
+{% endif %}
+
+{% if verbose_debug %}
+{% for key, value in _all_args.items() %}
+{{ key }}: {{ value }}
+{% endfor %}
+{% endif %}

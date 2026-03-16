@@ -1,0 +1,3 @@
+Configuration folder for Lyon, FR and the 2015 Enquête Ménages Déplacements (EMD), Lyon / Aire métropolitaine lyonnée transportation survey.
+
+EMD survey questions derived from https://data.progedo.fr/studies/doi/10.13144/lil-1023 Documentation tab, face-to-face survey questionnaire and data dictionary.

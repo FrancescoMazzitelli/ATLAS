@@ -1,0 +1,49 @@
+{#
+Age birth location
+#}
+{{' '}}
+{%- set AGE = YEAR - ANAI[7:]|int -%}
+{{'Tu es'}}
+{%- if SEXE == "Hommes" -%}
+    {{'un homme de'|wspace}}
+{%- elif SEXE == "Femmes" -%}
+    {{'une femme de'|wspace}}
+{%- endif -%}
+    {{AGED|wspace}}
+{%- set a_locs = [
+    "La Réunion",
+    "Saint-Pierre-et-Miquelon",
+    "Saint-Barthélemy",
+    "Saint-Martin",
+    "Paris",
+    "Wallis et Futuna",
+    "Île de Clipperton"
+] -%}
+{%- set en_locs  = [
+    "Guadeloupe",
+    "Martinique",
+    "Guyane",
+    "Mayotte",
+    "Corse-du-Sud",
+    "Haute-Corse",
+    "Polynésie Française",
+    "Nouvelle-Calédonie"
+] -%}
+{%- if SEXE == "Hommes" -%}
+    {{'né'|wspace}}
+{%- elif SEXE == "Femmes" -%}
+    {{'née'|wspace}}
+{%- endif -%}
+{{ANAI[7:]|wspace}}
+{%- if INAI == "À l'étranger" -%}
+    {{'hors de France'|wspace}}
+{%- elif "Autres COM" in DNAI -%}
+    {{"dans une collectivité d'outre-mer"|wspace}}
+{%- elif a_locs | select('in', DNAI) | list | length > 0 -%}
+    {{'à'|wspace + DNAI|decontext|wspace}}
+{%- elif en_locs | select('in', DNAI) | list | length > 0 -%}
+    {{'en'|wspace + DNAI|decontext|wspace}}
+{%- else -%}
+    {{'dans le'|wspace + DNAI|decontext|wspace}}
+{%- endif -%}
+{{'.'}}
