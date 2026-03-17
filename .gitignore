@@ -188,6 +188,7 @@ private/
 
 # ignore custom local files
 custom_files/
+ladarag/custom_files/
 
 # python cache
 __pycache__/

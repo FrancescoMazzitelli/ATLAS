@@ -176,25 +176,19 @@ services:
       
   routing-updater:
     build:
-      context: ./routing-updater
+      context: ./routing-updater-quarkus
       dockerfile: Dockerfile
     container_name: routing-updater
     ports:
-      - "7500:7500"
+      - "7500:8080"
     environment:
-      - CONSUL_HOST=registry
-      - CONSUL_PORT=8500
-      - GATEWAY_HOST=catalog-gateway
-      - GATEWAY_PORT=5000
-      - HEALTHCHECK_SERVICE_HOST=healthcheck-service
-      - HEALTHCHECK_SERVICE_PORT=5600
+      - TARGET_CONTAINER_NAME=valhalla
+      - TRAFFIC_TAR_PATH=/custom_files/traffic.tar
+      - VALHALLA_IP=valhalla
+      - VALHALLA_PORT=8002
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
-      registry:
-        condition: service_healthy
-      catalog-gateway:
-        condition: service_started
-      healthcheck-service:
-        condition: service_started
       valhalla:
         condition: service_healthy
 
@@ -208,14 +202,14 @@ services:
     environment:
       - tile_urls=https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf
       - build_elevation=True
-      - build_admins=True
+      - build_admins=False
       - build_time_zones=True
-      - server_threads=4
+      - server_threads=2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
-      interval: 15s
-      timeout: 15s
-      retries: 40
+      interval: 30s
+      timeout: 60s
+      retries: 150
 
 volumes:
   mongo-data:
