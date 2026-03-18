@@ -20,7 +20,17 @@ public class TrafficController {
         try {
             return trafficService.traceAndPatch(request.shape, request.speed);
         } catch (Exception e) {
-            return "Errore: " + e.getMessage();
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    @POST
+    @Path("/reset")
+    public String reset() {
+        try {
+            return trafficService.reset();
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
         }
     }
 }

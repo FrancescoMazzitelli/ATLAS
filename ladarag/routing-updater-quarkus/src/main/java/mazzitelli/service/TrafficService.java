@@ -35,25 +35,30 @@ public class TrafficService {
     public String traceAndPatch(List<TracePatchRequest.Coordinate> shape, int speed) throws Exception {
         Client client = ClientBuilder.newClient();
         String payload = createValhallaPayload(shape);
-        
+
         Response response = client.target(getValhallaUrl())
                 .request(MediaType.APPLICATION_JSON)
                 .post(Entity.json(payload));
 
         if (response.getStatus() != 200) {
-            throw new RuntimeException("Valhalla Trace failed: " + response.readEntity(String.class));
+            throw new RuntimeException("Valhalla trace_attributes failed: " + response.readEntity(String.class));
         }
 
         String jsonResponse = response.readEntity(String.class);
         List<Long> edgeIds = parseEdgeIds(jsonResponse);
 
         if (edgeIds.isEmpty()) {
-            return "No edge found at these coordinates.";
+            return "No edges found at these coordinates.";
         }
 
         containerManager.executeFullPipeline(edgeIds, speed);
 
-        return "Success: " + edgeIds.size() + " edges updated.";
+        return "Success: " + edgeIds.size() + " edges updated at " + speed + " kph.";
+    }
+
+    public String reset() throws Exception {
+        containerManager.executeReset();
+        return "Success: traffic restored to original speeds.";
     }
 
     private List<Long> parseEdgeIds(String json) throws Exception {
@@ -69,13 +74,13 @@ public class TrafficService {
     }
 
     private String createValhallaPayload(List<TracePatchRequest.Coordinate> shape) {
-    return "{"
-        + "\"shape\":" + serializeShape(shape) + ","
-        + "\"costing\":\"auto\","
-        + "\"filters\":{\"attributes\":[\"edge.id\",\"edge.way_id\"],\"action\":\"include\"},"
-        + "\"search_radius\":30,"
-        + "\"shape_match\":\"map_snap\""
-        + "}";
+        return "{"
+                + "\"shape\":" + serializeShape(shape) + ","
+                + "\"costing\":\"auto\","
+                + "\"filters\":{\"attributes\":[\"edge.id\",\"edge.way_id\"],\"action\":\"include\"},"
+                + "\"search_radius\":30,"
+                + "\"shape_match\":\"map_snap\""
+                + "}";
     }
 
     private String serializeShape(List<TracePatchRequest.Coordinate> shape) {

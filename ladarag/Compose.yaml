@@ -180,7 +180,7 @@ services:
       dockerfile: Dockerfile
     container_name: routing-updater
     ports:
-      - "7500:8080"
+      - "5700:8080"
     environment:
       - TARGET_CONTAINER_NAME=valhalla
       - TRAFFIC_TAR_PATH=/custom_files/traffic.tar
@@ -203,8 +203,8 @@ services:
       - tile_urls=https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf
       - build_elevation=True
       - build_admins=False
-      - build_time_zones=True
-      - server_threads=2
+      - build_time_zones=False
+      - server_threads=4
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
       interval: 30s

@@ -10,12 +10,18 @@ FROM registry.access.redhat.com/ubi9/ubi-minimal:9.6
 
 WORKDIR /work/
 
-RUN microdnf install -y tar gzip && microdnf clean all
+RUN microdnf install -y \
+    tar \
+    gzip \
+    findutils \
+    && microdnf clean all
 
-ADD https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz /tmp/docker.tgz
-
-RUN tar -xzf /tmp/docker.tgz -C /usr/bin --strip-components=1 docker/docker && \
-    rm /tmp/docker.tgz
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/ \
+  | grep -o 'docker-[0-9.]*.tgz' \
+  | sort -V \
+  | tail -n1 \
+  | xargs -I {} curl -fsSL https://download.docker.com/linux/static/stable/x86_64/{} \
+  | tar -xz -C /usr/bin --strip-components=1 docker/docker
 
 COPY --from=build /project/target/*-runner /work/application
 
