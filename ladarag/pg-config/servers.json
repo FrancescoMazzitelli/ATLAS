@@ -1,0 +1,34 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "PostGIS GIS",
+      "Group": "Servers",
+      "Host": "locations-db",
+      "Port": 5432,
+      "MaintenanceDB": "admin",
+      "Username": "admin",
+      "SSLMode": "prefer",
+      "SavePassword": true
+    },
+    "2": {
+      "Name": "PostGIS Traffic",
+      "Group": "Servers",
+      "Host": "locations-db",
+      "Port": 5432,
+      "MaintenanceDB": "traffic",
+      "Username": "admin",
+      "SSLMode": "prefer",
+      "SavePassword": true
+    },
+    "3": {
+      "Name": "PostGIS Roadblock",
+      "Group": "Servers",
+      "Host": "locations-db",
+      "Port": 5432,
+      "MaintenanceDB": "roadblock",
+      "Username": "admin",
+      "SSLMode": "prefer",
+      "SavePassword": true
+    }
+  }
+}

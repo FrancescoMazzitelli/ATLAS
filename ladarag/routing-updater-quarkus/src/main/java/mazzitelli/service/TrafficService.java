@@ -22,14 +22,14 @@ public class TrafficService {
     @Inject
     ContainerManager containerManager;
 
-    @ConfigProperty(name = "VALHALLA_IP", defaultValue = "valhalla")
-    String valhallaIp;
+    @ConfigProperty(name = "VALHALLA_HOST", defaultValue = "valhalla")
+    String valhallaHost;
 
     @ConfigProperty(name = "VALHALLA_PORT", defaultValue = "8002")
     String valhallaPort;
 
     private String getValhallaUrl() {
-        return "http://" + valhallaIp + ":" + valhallaPort + "/trace_attributes";
+        return "http://" + valhallaHost + ":" + valhallaPort + "/trace_attributes";
     }
 
     public String traceAndPatch(List<TracePatchRequest.Coordinate> shape, int speed) throws Exception {

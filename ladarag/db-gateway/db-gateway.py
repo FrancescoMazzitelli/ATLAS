@@ -49,6 +49,7 @@ qdrant_client = QdrantClient(QDRANT_URI)
 db = mongo_client[MONGO_DB]
 collection = db["services"]
 
+global is_server_ready
 is_server_ready = False
 embedding_model = None
 reranker_model = None

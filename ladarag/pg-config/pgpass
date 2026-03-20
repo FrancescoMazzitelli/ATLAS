@@ -1,0 +1,3 @@
+locations-db:5432:admin:admin:admin
+locations-db:5432:traffic:admin:admin
+locations-db:5432:roadblock:admin:admin
