@@ -89,24 +89,6 @@ services:
     depends_on:
       registry:
         condition: service_healthy
-      
-  routing-updater:
-    build:
-      context: ./routing-updater-quarkus
-      dockerfile: Dockerfile
-    container_name: routing-updater
-    ports:
-      - "5700:8080"
-    environment:
-      - TARGET_CONTAINER_NAME=valhalla
-      - TRAFFIC_TAR_PATH=/custom_files/traffic.tar
-      - VALHALLA_HOST=valhalla
-      - VALHALLA_PORT=8002
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      valhalla:
-        condition: service_healthy
 
   valhalla:
     image: ghcr.io/valhalla/valhalla-scripted:3.6.3
@@ -162,6 +144,53 @@ services:
       - ./pg-config/servers.json:/pgadmin4/servers.json:ro
       - ./pg-config/pgpass:/pgadmin4/pgpass:ro
 
+  shp-uploader:
+    build:
+      context: ./shp-uploader
+      dockerfile: Dockerfile
+    container_name: shp-uploader
+    ports:
+      - "5802:5000"
+    environment:
+      DB_CONNECTIONS: |
+            {
+              "traffic":{
+                "host":"locations-db",
+                "port":5432,
+                "dbname":"traffic",
+                "user":"admin",
+                "password":"admin"
+              },
+              "roadblock":{
+                "host":"locations-db",
+                "port":5432,
+                "dbname":"roadblock",
+                "user":"admin",
+                "password":"admin"
+              }
+            }
+    depends_on:
+      locations-db:
+        condition: service_healthy
+
+  routing-updater:
+    build:
+      context: ./routing-updater-quarkus
+      dockerfile: Dockerfile
+    container_name: routing-updater
+    ports:
+      - "5700:8080"
+    environment:
+      - TARGET_CONTAINER_NAME=valhalla
+      - TRAFFIC_TAR_PATH=/custom_files/traffic.tar
+      - VALHALLA_HOST=valhalla
+      - VALHALLA_PORT=8002
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      valhalla:
+        condition: service_healthy
+
   roadblock-service:
     build:
       context: ./roadblock-service-quarkus
@@ -181,6 +210,35 @@ services:
       - POSTGIS_PASSWORD=admin
     ports:
       - "5701:8080"
+    depends_on:
+      valhalla:
+        condition: service_healthy
+      locations-db:
+        condition: service_healthy
+      catalog-gateway:
+        condition: service_healthy
+
+  traffic-service:
+    build:
+      context: ./traffic-service-quarkus
+      dockerfile: Dockerfile
+    container_name: traffic-service
+    environment:
+      - SELF_HOST=traffic-service
+      - SELF_PORT=8080
+      - VALHALLA_HOST=valhalla
+      - VALHALLA_PORT=8002
+      - CONSUL_HOST=registry
+      - CONSUL_PORT=8500
+      - GATEWAY_HOST=catalog-gateway
+      - GATEWAY_PORT=5000
+      - UPDATER_HOST=routing-updater
+      - UPDATER_PORT=8080
+      - POSTGIS_JDBC=jdbc:postgresql://locations-db:5432/traffic
+      - POSTGIS_USER=admin
+      - POSTGIS_PASSWORD=admin
+    ports:
+      - "5702:8080"
     depends_on:
       valhalla:
         condition: service_healthy

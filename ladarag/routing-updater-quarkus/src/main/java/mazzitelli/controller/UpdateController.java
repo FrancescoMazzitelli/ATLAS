@@ -4,15 +4,15 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import mazzitelli.model.TracePatchRequest;
-import mazzitelli.service.TrafficService;
+import mazzitelli.service.UpdateService;
 
 @Path("/traffic")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-public class TrafficController {
+public class UpdateController {
 
     @Inject
-    TrafficService trafficService;
+    UpdateService trafficService;
 
     @POST
     @Path("/patch")

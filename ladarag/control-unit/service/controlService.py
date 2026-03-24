@@ -277,7 +277,9 @@ class Controller:
 
         services = registry.services()
 
-        register_key = "POST /register"
+        register_key = "/register"
+        health_key = "/health"
+
         print("DISCOVERED SERVICES:")
 
         input = {
@@ -309,12 +311,17 @@ class Controller:
                 "error": "None of the discovered services are currently available in the registry"
             }
         
+        def filter_key_dict(service_dict):
+            if isinstance(service_dict, dict):
+                return {k: v for k, v in service_dict.items() if not (k.endswith(register_key) or k.endswith(health_key))}
+            return service_dict
+        
         for service in filtered_service_list:
             if isinstance(service.get("capabilities"), dict):
-                service["capabilities"].pop(register_key, None)
+                service["capabilities"] = filter_key_dict(service["capabilities"])
 
             if isinstance(service.get("endpoints"), dict):
-                service["endpoints"].pop(register_key, None)
+                service["endpoints"] = filter_key_dict(service["endpoints"])
 
 
             print(service)

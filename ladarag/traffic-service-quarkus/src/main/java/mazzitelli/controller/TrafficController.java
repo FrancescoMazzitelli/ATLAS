@@ -8,8 +8,8 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.*;
 import mazzitelli.model.Location;
 
-@Path("/roadblock")
-public interface RoadblockController {
+@Path("/traffic")
+public interface TrafficController {
 
 
     @GET
@@ -22,7 +22,7 @@ public interface RoadblockController {
     @Path("/alternative")
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Given a list of coordinates, calculates the optimal route while avoiding roads closed due to construction or emergencies.")
+    @Operation(description = "Given a list of coordinates, calculates the optimal route while avoiding congested routes due to intende traffic")
     public Response computeAlternativePath(List<Location> locations);
 
     @POST
