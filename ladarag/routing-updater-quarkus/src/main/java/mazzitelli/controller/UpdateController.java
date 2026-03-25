@@ -18,7 +18,7 @@ public class UpdateController {
     @Path("/patch")
     public String patch(TracePatchRequest request) {
         try {
-            return trafficService.traceAndPatch(request.shape, request.speed);
+            return trafficService.traceAndPatch(request.shape);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }

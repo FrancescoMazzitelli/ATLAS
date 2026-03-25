@@ -9,8 +9,9 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import mazzitelli.model.TracePatchRequest;
 
-import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,8 +33,10 @@ public class UpdateService {
         return "http://" + valhallaHost + ":" + valhallaPort + "/trace_attributes";
     }
 
-    public String traceAndPatch(List<TracePatchRequest.Coordinate> shape, int speed) throws Exception {
+    
+    public String traceAndPatch(List<TracePatchRequest.Coordinate> shape) throws Exception {
         Client client = ClientBuilder.newClient();
+
         String payload = createValhallaPayload(shape);
 
         Response response = client.target(getValhallaUrl())
@@ -41,19 +44,21 @@ public class UpdateService {
                 .post(Entity.json(payload));
 
         if (response.getStatus() != 200) {
-            throw new RuntimeException("Valhalla trace_attributes failed: " + response.readEntity(String.class));
+            throw new RuntimeException("Valhalla trace_attributes failed: "
+                    + response.readEntity(String.class));
         }
 
-        String jsonResponse = response.readEntity(String.class);
-        List<Long> edgeIds = parseEdgeIds(jsonResponse);
+        String json = response.readEntity(String.class);
 
-        if (edgeIds.isEmpty()) {
-            return "No edges found at these coordinates.";
+        Map<Long, Integer> edgeSpeedMap = mapEdgesToSpeed(json, shape);
+
+        if (edgeSpeedMap.isEmpty()) {
+            return "No edges found.";
         }
 
-        containerManager.executeFullPipeline(edgeIds, speed);
+        containerManager.executeFullPipeline(edgeSpeedMap);
 
-        return "Success: " + edgeIds.size() + " edges updated at " + speed + " kph.";
+        return "Success: " + edgeSpeedMap.size() + " edges updated.";
     }
 
     public String reset() throws Exception {
@@ -61,29 +66,48 @@ public class UpdateService {
         return "Success: traffic restored to original speeds.";
     }
 
-    private List<Long> parseEdgeIds(String json) throws Exception {
+    private Map<Long, Integer> mapEdgesToSpeed(String json, List<TracePatchRequest.Coordinate> shape) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         JsonNode root = mapper.readTree(json);
-        List<Long> ids = new ArrayList<>();
-        if (root.has("edges")) {
-            for (JsonNode edge : root.get("edges")) {
-                if (edge.has("id")) ids.add(edge.get("id").asLong());
-            }
+
+        Map<Long, Integer> map = new HashMap<>();
+
+        if (!root.has("edges")) return map;
+
+        JsonNode edges = root.get("edges");
+
+        int avgSpeed = shape.stream()
+                .mapToInt(s -> s.speed)
+                .sum() / shape.size();
+
+        for (JsonNode edge : edges) {
+            if (!edge.has("id")) continue;
+
+            long edgeId = edge.get("id").asLong();
+            map.put(edgeId, avgSpeed);
         }
-        return ids;
+
+        return map;
     }
 
     private String createValhallaPayload(List<TracePatchRequest.Coordinate> shape) {
-        return "{"
-                + "\"shape\":" + serializeShape(shape) + ","
-                + "\"costing\":\"auto\","
-                + "\"filters\":{\"attributes\":[\"edge.id\",\"edge.way_id\"],\"action\":\"include\"},"
-                + "\"search_radius\":30,"
-                + "\"shape_match\":\"map_snap\""
-                + "}";
-    }
+        StringBuilder sb = new StringBuilder();
+        sb.append("{\"shape\":[");
 
-    private String serializeShape(List<TracePatchRequest.Coordinate> shape) {
-        return new ObjectMapper().valueToTree(shape).toString();
+        for (int i = 0; i < shape.size(); i++) {
+            var c = shape.get(i);
+            sb.append("{\"lat\":").append(c.lat)
+            .append(",\"lon\":").append(c.lon).append("}");
+            if (i < shape.size() - 1) sb.append(",");
+        }
+
+        sb.append("],");
+        sb.append("\"costing\":\"auto\",");
+        sb.append("\"shape_match\":\"map_snap\",");
+        sb.append("\"search_radius\":50,");
+        sb.append("\"filters\":{\"attributes\":[\"edge.way_id\", \"edge.id\"],\"action\":\"include\"}");
+        sb.append("}");
+
+        return sb.toString();
     }
 }

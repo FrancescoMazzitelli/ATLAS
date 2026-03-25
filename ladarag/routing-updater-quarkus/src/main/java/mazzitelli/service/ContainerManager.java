@@ -2,12 +2,12 @@ package mazzitelli.service;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
+
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.*;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -37,15 +37,15 @@ public class ContainerManager {
     // Public pipeline: patch
     // ─────────────────────────────────────────────
 
-    public void executeFullPipeline(List<Long> edgeIds, int speed) throws Exception {
+    public void executeFullPipeline(Map<Long, Integer> edgeSpeedMap) throws Exception {
         ensureOriginalBackup();
 
         log.info("PATCH 1. Copy original backup to work file...");
         Files.copy(Path.of(LOCAL_BACKUP_PATH), Path.of(LOCAL_WORK_PATH),
                 StandardCopyOption.REPLACE_EXISTING);
 
-        log.info("PATCH 2. Apply in-place patch on work file...");
-        applyPatch(LOCAL_WORK_PATH, edgeIds, speed);
+        log.info("PATCH 2. Apply in-place patch...");
+        applyPatch(LOCAL_WORK_PATH, edgeSpeedMap);
 
         log.info("PATCH 3. Remove old traffic.tar from container...");
         runCommand("docker", "exec", CONTAINER_NAME,
@@ -58,7 +58,18 @@ public class ContainerManager {
         log.info("PATCH 5. Restart container...");
         runCommand("docker", "restart", CONTAINER_NAME);
 
-        log.info("Done. " + edgeIds.size() + " edges patched at " + speed + " kph.");
+        Thread.sleep(5000);
+        log.info("PATCH 6. Wait for restart completion...");
+        boolean healthy = false;
+        while (!healthy) {
+            String status = runCommand("docker", "inspect", "--format={{.State.Health.Status}}", CONTAINER_NAME);
+            if (status.trim().contains("healthy")) healthy = true;
+            else {
+                Thread.sleep(1000);
+            }
+        }
+
+        log.info("Done. " + edgeSpeedMap.size() + " edges patched.");
     }
 
     // ─────────────────────────────────────────────
@@ -78,6 +89,17 @@ public class ContainerManager {
 
         log.info("RESET 3. Restart container...");
         runCommand("docker", "restart", CONTAINER_NAME);
+
+        Thread.sleep(5000);
+        log.info("RESET 4. Wait for restart completion...");
+        boolean healthy = false;
+        while (!healthy) {
+            String status = runCommand("docker", "inspect", "--format={{.State.Health.Status}}", CONTAINER_NAME);
+            if (status.trim().contains("healthy")) healthy = true;
+            else {
+                Thread.sleep(1000);
+            }
+        }
 
         log.info("Done. Traffic tar restored to original.");
     }
@@ -114,37 +136,47 @@ public class ContainerManager {
     // Binary patch
     // ─────────────────────────────────────────────
 
-    private void applyPatch(String tarPath, List<Long> edgeIds, int speed) throws IOException {
+    private void applyPatch(String tarPath, Map<Long, Integer> edgeSpeedMap) throws IOException {
         Map<Integer, Long> tileOffsets = peres_readTarIndex(tarPath);
 
         try (RandomAccessFile raf = new RandomAccessFile(tarPath, "rw")) {
-            for (Long gid : edgeIds) {
+
+            for (Map.Entry<Long, Integer> entry : edgeSpeedMap.entrySet()) {
+
+                long gid = entry.getKey();
+                int speed = entry.getValue();
+
                 int level   = (int) (gid & LEVEL_MASK);
                 int tileId  = (int) ((gid >> LEVEL_BITS) & TILE_ID_MASK);
                 int edgeIdx = (int) (gid >> (LEVEL_BITS + TILE_ID_BITS));
                 int tid32   = (tileId << LEVEL_BITS) | level;
 
                 if (!tileOffsets.containsKey(tid32)) {
-                    log.warnf("Tile not found in index: level=%d tileId=%d", level, tileId);
+                    log.warnf("Tile not found: level=%d tileId=%d", level, tileId);
                     continue;
                 }
 
                 long tileOffsetInTar = tileOffsets.get(tid32);
 
-                // Read edge_count from TrafficTileHeader (offset +16 inside the header)
                 raf.seek(tileOffsetInTar + 16);
                 byte[] edgeCountBuf = new byte[4];
                 raf.read(edgeCountBuf);
-                int edgeCount = ByteBuffer.wrap(edgeCountBuf).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                int edgeCount = ByteBuffer.wrap(edgeCountBuf)
+                        .order(ByteOrder.LITTLE_ENDIAN)
+                        .getInt();
 
                 if (edgeIdx >= edgeCount) {
-                    log.warnf("edge_idx=%d out of range (edge_count=%d) in tile (%d,%d)",
-                            edgeIdx, edgeCount, level, tileId);
+                    log.warnf("edge_idx=%d out of range (%d)", edgeIdx, edgeCount);
                     continue;
                 }
 
-                long speedOffset = tileOffsetInTar + TRAFFIC_HEADER_SIZE + ((long) edgeIdx * TRAFFIC_SPEED_SIZE);
-                ByteBuffer buf = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+                long speedOffset = tileOffsetInTar
+                        + TRAFFIC_HEADER_SIZE
+                        + ((long) edgeIdx * TRAFFIC_SPEED_SIZE);
+
+                ByteBuffer buf = ByteBuffer.allocate(8)
+                        .order(ByteOrder.LITTLE_ENDIAN);
+
                 buf.putLong(encodeSpeed(speed));
 
                 raf.seek(speedOffset);
@@ -217,25 +249,39 @@ public class ContainerManager {
     // Process runner
     // ─────────────────────────────────────────────
 
-    private void runCommand(String... args) throws IOException, InterruptedException {
+    private String runCommand(String... args) throws IOException, InterruptedException {
         ProcessBuilder pb = new ProcessBuilder(args);
         Process p = pb.start();
 
-        new Thread(() -> {
-            try (Scanner s = new Scanner(p.getInputStream())) {
-                while (s.hasNextLine()) log.info(s.nextLine());
-            }
-        }).start();
+        StringBuilder output = new StringBuilder();
 
-        new Thread(() -> {
+        Thread outThread = new Thread(() -> {
+            try (Scanner s = new Scanner(p.getInputStream())) {
+                while (s.hasNextLine()) {
+                    String line = s.nextLine();
+                    log.info(line);
+                    output.append(line).append("\n");
+                }
+            }
+        });
+
+        Thread errThread = new Thread(() -> {
             try (Scanner s = new Scanner(p.getErrorStream())) {
                 while (s.hasNextLine()) log.error(s.nextLine());
             }
-        }).start();
+        });
+
+        outThread.start();
+        errThread.start();
 
         int exitCode = p.waitFor();
+        outThread.join();
+        errThread.join();
+
         if (exitCode != 0) {
             throw new RuntimeException("Command failed: " + String.join(" ", args) + " | exit: " + exitCode);
         }
+
+        return output.toString();
     }
 }

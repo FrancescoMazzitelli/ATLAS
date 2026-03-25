@@ -123,7 +123,7 @@ public class RoadblockService implements RoadblockController {
         sb.append("],");
         sb.append("\"costing\":\"auto\",");
         sb.append("\"directions_options\":{");
-        sb.append("\"units\":\"km\",\"language\":\"it-IT\"");
+        sb.append("\"units\":\"km\",\"language\":\"en-US\"");
         sb.append("},");
         sb.append("\"shape_format\":\"polyline6\",");
         sb.append("\"shape_attributes\":[\"edge.id\",\"edge.speed\",\"edge.length\"],");
@@ -217,7 +217,7 @@ public class RoadblockService implements RoadblockController {
             }
 
             String sql = "SELECT ST_Y(geom) AS lat, ST_X(geom) AS lon " +
-                         "FROM roadblocks " +
+                         "FROM roadblock " +
                          "WHERE ST_DWithin(" +
                          "  geom::geography, " +
                          "  ST_SetSRID(ST_MakeLine(ARRAY[" + pointsArray + "]), 4326)::geography, " +

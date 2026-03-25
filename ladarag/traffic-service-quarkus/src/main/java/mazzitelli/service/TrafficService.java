@@ -68,6 +68,10 @@ public class TrafficService implements TrafficController {
     @ConfigProperty(name = "POSTGIS_PASSWORD", defaultValue = "admin")
     String postgisPassword;
 
+    // -------------------------------------------------------------------------
+    // URL helpers
+    // -------------------------------------------------------------------------
+
     private String getValhallaUrl() {
         return "http://" + valhallaHost + ":" + valhallaPort + "/route";
     }
@@ -84,6 +88,10 @@ public class TrafficService implements TrafficController {
         return "http://" + updaterHost + ":" + updaterPort;
     }
 
+    // -------------------------------------------------------------------------
+    // Controller endpoints
+    // -------------------------------------------------------------------------
+
     @Override
     public Response healthCheck() {
         return Response.ok("{\"status\":\"ALIVE\"}").build();
@@ -92,34 +100,31 @@ public class TrafficService implements TrafficController {
     @Override
     public Response computeAlternativePath(List<Location> locations) {
         try {
-            log.info("1. Building the initial request...");
-            String request = buildValhallaRequest(locations);
+            log.info("1. Building the initial Valhalla request...");
+            String valhallaRequest = buildValhallaRequest(locations);
 
-            log.info("2. Sending the initial request to Valhalla...");
-            String initialRouteJson = callValhalla(request);
+            log.info("2. Sending initial request to Valhalla...");
+            String initialRouteJson = callValhalla(valhallaRequest);
 
-            log.info("3. Extracting the set of locations along the route...");
+            log.info("3. Decoding route points from initial response...");
             List<Location> routePoints = decodeRoutePoints(initialRouteJson);
 
-            log.info("4. Retrieving congested segments from PostGIS near the route...");
-            List<TrafficSegment> congestedSegments = queryCongestedSegmentsNearRoute(routePoints);
+            log.info("4. Querying PostGIS for congested points near the route...");
+            List<CongestedPoint> congestedPoints = queryCongestedPointsNearRoute(routePoints);
 
             String finalRoute;
 
-            if (!congestedSegments.isEmpty()) {
-                log.info("5. Patching routing engine with " + congestedSegments.size() + " congested segment(s)...");
-                for (TrafficSegment segment : congestedSegments) {
-                    String patchRequest = buildPatchRequest(segment.shape, segment.speed);
-                    callUpdaterPatch(patchRequest);
-                }
+            if (!congestedPoints.isEmpty()) {
+                log.info("5. Sending " + congestedPoints.size() + " congested point(s) to routing updater...");
+                callUpdaterPatch(buildPatchRequest(routePoints, congestedPoints));
 
-                log.info("6. Sending the final request to Valhalla after patching...");
-                finalRoute = callValhalla(request);
+                log.info("6. Sending final request to Valhalla with updated speeds...");
+                finalRoute = callValhalla(valhallaRequest);
 
                 log.info("7. Resetting routing engine to original speeds...");
                 callUpdaterReset();
             } else {
-                log.info("5. No congested segments found near route, returning initial route...");
+                log.info("5. No congested points found near route — returning initial route.");
                 finalRoute = initialRouteJson;
             }
 
@@ -163,46 +168,55 @@ public class TrafficService implements TrafficController {
     // Request builders
     // -------------------------------------------------------------------------
 
-    private String buildPatchRequest(List<Location> shape, int speed) throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
+    /**
+     * Builds the JSON body for POST /traffic/patch.
+     * Each coordinate carries its own speed so the updater can resolve
+     * different edge speeds in a single HTTP call.
+     * If it's possible, the request is enriched with original route
+     * points to avoid failures of /trace-attributes
+     */
+    private String buildPatchRequest(List<Location> routePoints, List<CongestedPoint> congested) {
         StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        sb.append("\"shape\":[");
-        for (int i = 0; i < shape.size(); i++) {
-            Location loc = shape.get(i);
-            sb.append("{\"lat\":").append(loc.lat)
-              .append(",\"lon\":").append(loc.lon).append("}");
-            if (i < shape.size() - 1) sb.append(",");
+        sb.append("{\"shape\":[");
+        
+        boolean first = true;
+        for (Location rp : routePoints) {
+            CongestedPoint nearest = null;
+            double minDist = Double.MAX_VALUE;
+            for (CongestedPoint cp : congested) {
+                double d = Math.hypot(rp.lat - cp.lat, rp.lon - cp.lon);
+                if (d < minDist) { minDist = d; nearest = cp; }
+            }
+            if (nearest != null && minDist < 0.005) {
+                if (!first) sb.append(",");
+                sb.append("{\"lat\":").append(rp.lat)
+                .append(",\"lon\":").append(rp.lon)
+                .append(",\"speed\":").append(nearest.speed).append("}");
+                first = false;
+            }
         }
-        sb.append("],");
-        sb.append("\"speed\":").append(speed);
-        sb.append("}");
+        sb.append("]}");
         return sb.toString();
     }
 
     private String buildValhallaRequest(List<Location> locations) {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
-
         sb.append("\"locations\":[");
         for (int i = 0; i < locations.size(); i++) {
             Location loc = locations.get(i);
             sb.append("{\"lat\":").append(loc.lat)
-            .append(",\"lon\":").append(loc.lon).append("}");
+              .append(",\"lon\":").append(loc.lon).append("}");
             if (i < locations.size() - 1) sb.append(",");
         }
         sb.append("],");
         sb.append("\"costing\":\"auto\",");
         sb.append("\"date_time\":{\"type\":0},");
-        sb.append("\"costing_options\":{");
-        sb.append("\"auto\":{");
-        sb.append("\"disable_hierarchy_pruning\":true");
-        sb.append("}},");
-        sb.append("\"directions_options\":{");
-        sb.append("\"units\":\"kilometers\"");
+        sb.append("\"costing_options\":{\"auto\":{\"disable_hierarchy_pruning\":true}},");
+        sb.append("\"directions_options\":{\"units\":\"km\",\"language\":\"en-US\"},");
+        sb.append("\"shape_format\":\"polyline6\",");
+        sb.append("\"shape_attributes\":[\"edge.id\",\"edge.speed\",\"edge.length\"]");
         sb.append("}");
-        sb.append("}");
-
         return sb.toString();
     }
 
@@ -276,20 +290,23 @@ public class TrafficService implements TrafficController {
     // -------------------------------------------------------------------------
     // PostGIS query
     //
-    // Expects a table named "traffic_segments" in the "traffic" database with:
-    //   geom    GEOMETRY   — the segment geometry (LineString or Point)
-    //   speed   INTEGER    — the congested speed in kph to apply
-    //   shape   JSONB      — array of {lat, lon} coordinates for the updater
+    // Queries the "traffic" table (populated via SHP Uploader) with columns:
+    //   geom   GEOMETRY  — point geometry (WGS84)
+    //   speed  INTEGER   — congested speed in kph
+    //
+    // Returns a flat list of CongestedPoint, each carrying its own lat/lon/speed,
+    // passed as-is to the updater in a single HTTP call.
     // -------------------------------------------------------------------------
 
-    private static class TrafficSegment {
-        List<Location> shape;
+    private static class CongestedPoint {
+        double lat;
+        double lon;
         int speed;
     }
 
-    private List<TrafficSegment> queryCongestedSegmentsNearRoute(List<Location> route) throws SQLException {
-        List<TrafficSegment> segments = new ArrayList<>();
-        if (route.isEmpty()) return segments;
+    private List<CongestedPoint> queryCongestedPointsNearRoute(List<Location> route) throws SQLException {
+        List<CongestedPoint> result = new ArrayList<>();
+        if (route.isEmpty()) return result;
 
         try (Connection conn = DriverManager.getConnection(postgisJdbc, postgisUser, postgisPassword)) {
             StringBuilder pointsArray = new StringBuilder();
@@ -299,10 +316,8 @@ public class TrafficService implements TrafficController {
                 if (i < route.size() - 1) pointsArray.append(", ");
             }
 
-            // Retrieves all congested segments within 50 metres of the route,
-            // along with their target speed and the coordinate shape for the updater.
-            String sql = "SELECT speed, shape " +
-                         "FROM traffic_segments " +
+            String sql = "SELECT ST_Y(geom) AS lat, ST_X(geom) AS lon, \"SPEED\" AS speed " +
+                         "FROM traffic " +
                          "WHERE ST_DWithin(" +
                          "  geom::geography, " +
                          "  ST_SetSRID(ST_MakeLine(ARRAY[" + pointsArray + "]), 4326)::geography, " +
@@ -311,28 +326,16 @@ public class TrafficService implements TrafficController {
 
             try (PreparedStatement stmt = conn.prepareStatement(sql);
                  ResultSet rs = stmt.executeQuery()) {
-                ObjectMapper mapper = new ObjectMapper();
                 while (rs.next()) {
-                    TrafficSegment segment = new TrafficSegment();
-                    segment.speed = rs.getInt("speed");
-
-                    // shape is stored as a JSONB array: [{lat, lon}, ...]
-                    String shapeJson = rs.getString("shape");
-                    List<Location> shape = new ArrayList<>();
-                    for (var node : mapper.readTree(shapeJson)) {
-                        Location loc = new Location();
-                        loc.lat = node.get("lat").asDouble();
-                        loc.lon = node.get("lon").asDouble();
-                        shape.add(loc);
-                    }
-                    segment.shape = shape;
-                    segments.add(segment);
+                    CongestedPoint p = new CongestedPoint();
+                    p.lat   = rs.getDouble("lat");
+                    p.lon   = rs.getDouble("lon");
+                    p.speed = rs.getInt("speed");
+                    result.add(p);
                 }
-            } catch (Exception e) {
-                throw new SQLException("Error parsing traffic segments from PostGIS", e);
             }
         }
-        return segments;
+        return result;
     }
 
     // -------------------------------------------------------------------------
