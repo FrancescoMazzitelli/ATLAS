@@ -1,0 +1,22 @@
+{#
+
+Residence
+
+#}
+{{' '}}
+{{'Tu habites'}}
+{%- if 'Ain' in DEPT -%}
+    {{"dans l'Ain"|wspace}}
+{%- elif 'Isère' in DEPT -%}
+    {{"en Isère"|wspace}}
+{%- elif 'Loire' in DEPT -%}
+    {{'dans la Loire'|wspace}}
+{%- elif 'Rhône' in DEPT -%}
+    {{'dans le Rhône'|wspace}}
+{%- endif -%}
+{%- if (TYPL == 'Maison') or ('Chambre' in TYPL) or ('Pièce' in TYPL) -%}
+    {{'dans une'|wspace + TYPL|decontext|desentence|wspace}}
+{%- elif (TYPL == 'Appartement') or ('fortune' in TYPL) or ('Hors' in TYPL)-%}
+    {{'dans un'|wspace + TYPL|desentence|wspace}}
+{%- endif -%}
+{{ANEMR|ANEMR_select|wspace if not ' ' else ''+ "."}}

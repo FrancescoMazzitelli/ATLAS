@@ -1,0 +1,85 @@
+{#
+Occupation
+#}
+{# Student and educational attainment #}
+{%- if not 'No schooling completed' in SCL -%}
+    {{'Your highest educational attainment is '|wspace}}
+    {%- if 'Grade' in SCHL or SCHL.startswith('1') -%}
+        {{SCHL}}
+    {%- elif 'Professional' in SCHL -%}
+        {{'a Professional degree'}}
+    {%- else -%}
+        {{SCHL|indefinite}}
+    {%- endif -%}
+    {%- if 'degree' in SCHL and FOD1P != 'MISSING' -%}
+        {{' in ' + FOD1P}}
+    {%- endif -%}
+    {%- if 'public' in SCH  -%}
+        {{' and you attend a public college'}}
+    {%- elif 'private' in SCH -%}
+        {{' and you attend a private college'}}
+    {%- endif -%}
+    {# Check student level #}
+    {%- if 'undergraduate' in SCHG -%}
+        {{' as an undergraduate student'}}
+    {%- elif 'professional' in SCHG -%}
+        {{' as graduate or professional student'}}
+    {%- endif -%}
+    {{'. '}}
+{%- endif -%}
+{# end student #}
+{# Employment/Military Service#}
+{# Not in military and describe place of employment#}
+{%- if (MIL == 'Never served in the military') or (MIL == 'On active duty in the past, but not now') -%}
+    {%- if 'Unemployed' in ESR -%}
+    {{'You are currently unemployed'}}
+    {%- elif COW == 'MISSING' -%}
+    {{'You are not working'}}
+    {%- else -%}
+        {%- if 'for-profit' in COW -%}
+        {{'You are an employee of a for-profit business'}}
+        {%- elif 'not-for-profit' in COW -%}
+        {{'You are an employee of a not-for-profit or charitable organization'}}
+        {%- elif 'Self-employed' in COW -%}
+        {{'You are self-employed'}}
+        {%- elif 'government' in COW -%}
+        {{'You are a ' + COW.split(' ', 1)[0] + ' government employee'}}
+        {%- elif 'family' in COW -%}
+        {{'You are ' + COW}}
+        {%- elif 'unemployed' in COW -%}
+        {{'You are unemployed'}}
+        {%- endif -%}
+        {{' in' + NAICSP.lower().split('-',1)[-1]|wspace|decontext}}
+        {%- if 'Not in labor force' in ESR -%}
+            {{' but are not currently working'}}
+        {%- endif -%}
+    {%- endif -%}
+{# In military #}
+{%- elif MIL == 'Only on active duty for training in Reserves/National Guard' or "National Guard" in NAICSP -%}
+    {{'You are on active duty for training in Reserves/National Guard'}}
+{%- else -%}
+    {{'You are on active duty in the' + NAICSP.split('-',1)[-1]|wspace}}
+{%- endif -%}
+{{'.'}}
+{# end occupation #}
+{# Veteran status #}
+{%- if VPS != 'MISSING' and 'Between' not in VPS -%}
+    {{'You are a U.S. veteran that served in the' + VPS|decontext(':')|wspace + '.'}}
+{%- elif 'Between' in VPS -%}
+    {{'You are a U.S. veteran that served in' + VPS|decontext(' only')|desentence|wspace + '.'}}
+{%- endif -%}
+{# Income #}
+{%- set SWINC = SSP|int + SSIP|int -%}
+{%- if PERNP|int > 0 -%}
+    {{'In the last year you earned' + PERNP|to_currency|wspace}}
+    {%- if SWINC > 0 -%}
+        {{'and received'|wspace + SWINC|to_currency|wspace + 'from social services'|wspace}}
+    {%- endif -%}
+        {{'. You typically work' + WKHP|wspace + 'hours per week'|wspace}}
+    {%- if WKWN != 'MISSING' -%}
+        {{'and have worked for'|wspace + WKWN|wspace + 'weeks in the past year'|wspace}}
+    {%- endif -%}
+{{'.'}}
+{%- elif PERNP|int == 0 and SWINC|int > 0 -%}
+    {{'You recieved' + SWINC|to_currency|wspace + 'from social services.'|wspace}}
+{%- endif -%}

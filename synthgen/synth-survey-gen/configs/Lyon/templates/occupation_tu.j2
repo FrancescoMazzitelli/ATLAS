@@ -1,0 +1,56 @@
+{#
+
+Occupation
+
+#}
+{{' '}}
+{%- if 'Actifs ayant un emploi' in TACT-%}
+    {{'Tu travailles'}}
+    {%- if 'complet' in TP -%}
+        {{'à plein temps'|wspace}}
+    {%- elif 'partiel' in TP-%}
+        {{'à temps partiel'|wspace}}
+    {%- endif -%}
+    {%- if 'Non' not in STATR -%}
+        {{'comme salarié'|wspace}}
+    {%- else -%}
+        {{'comme non salarié'|wspace}}
+    {%- endif -%}
+    {{'dans'|wspace}}
+    {%- if (
+        NA17.startswith('Activités') or
+        NA17.startswith('Autres') or
+        NA17.startswith('Transports')
+        ) -%}
+        {{'les'|wspace + NA17|desentence|wspace|decontext}}
+    {%- elif (
+        NA17.startswith('Commerce')
+        ) -%}
+        {{"le"|wspace + NA17|desentence|wspace}}
+    {%- elif (
+        NA17.startswith('Administration') or
+        NA17.startswith('Agriculture') or
+        NA17.startswith('Hébergement') or
+        NA17.startswith('Industries') or
+        NA17.startswith('Information')
+        ) -%}
+        {{"l'"|wspace + NA17|desentence}}
+    {%- else -%}
+        {{'la'|wspace + NA17|desentence|wspace}}
+    {%- endif -%}
+{%- elif TACT == 'Chômeurs' -%}
+    {{'Tu es au chômage'}}
+{%- elif 'Retraités' in TACT -%}
+    {{'Tu es à la retraite'}}
+{%- elif 'étudiants' in TACT -%}
+    {{'Tu es étudiant'}}
+{%- elif TACT == 'Femmes ou hommes au foyer' -%}
+    {%- if SEXE == 'Hommes' -%}
+        {{'Tu es un homme au foyer'}}
+    {%- else -%}
+        {{'Tu es une femme au foyer'}}
+    {%- endif -%}
+{%- else -%}
+    {{'Tu ne travailles pas en ce moment'}}
+{%- endif -%}
+{{'.'}}

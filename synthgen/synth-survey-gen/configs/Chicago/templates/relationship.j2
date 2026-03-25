@@ -1,0 +1,33 @@
+{#
+Relationship status
+#}
+{%- if MAR == 'Married'  -%}
+    {%- set MARYR = (YEAR - MARHYP|int + 1)|string -%}
+    {{'You have been married for'|wspace + MARYR|wspace + 'years'|wspace}}
+        {%- if 'husband' in  RELSHIPP -%}
+    {{' to '+ RELSHIPP|desentence|indefinite}}
+        {%- elif RELSHIPP != 'Reference person' -%}
+    {{'and live with'|wspace + RELSHIPP|desentence|indefinite|wspace}}
+{%- endif -%}
+{{'.'}}
+{%- else -%}
+    {%- if MAR == "Widowed" -%}
+    {{'You are widowed and you'|wspace}}
+    {%- elif MAR == 'Divorced' -%}
+    {%- if MARHD == "No" -%}
+    {{'You are divorced and you'|wspace}}
+    {%- else -%}
+    {{'You are recently divorced and you'|wspace}}
+    {%- endif -%}
+    {% elif MAR == 'Separated' -%}
+    {{'You are separated from your previous partner and you'|wspace}}
+    {%-else -%}
+    {{'You'|wspace}}
+    {%- endif -%}
+    {# Relationship to others in household #}
+    {%- if RELSHIPP != 'Reference person' -%}
+    {{' live with ' + RELSHIPP|desentence|indefinite + '.'}}
+    {%- else -%}
+    {{" live alone."}}
+    {%- endif -%}
+{% endif %}

@@ -1,0 +1,22 @@
+{#
+Birth and citizenship
+#}
+{%- if CIT.startswith('B') -%}
+    {%- set DOB = (YEAR - AGEP|int)|string -%}
+    {{' You were' + CIT|desentence|wspace + ' in ' + DOB}}
+    {%- if  'Puerto Rico' not in CIT -%}
+        {{' in ' + POBP[:-3]+'.'}}
+    {%- endif -%}
+{%- else -%}
+    {%- set DOB = (YEAR - AGEP|int)|string -%}
+    {%- if CIT.startswith('U') -%}
+    {{
+        ' You were born in' + DOB|wspace + 'in'|wspace + POBP|wspace
+        +'and became a'|wspace + CIT|wspace + 'in'|wspace + CITWP|wspace + '.'
+    }}
+    {%- else -%}
+    {{
+    ' You are not ' + CIT | desentence+' and were born in '+DOB+' in' + POBP|wspace + '.'
+    }}
+    {%- endif -%}
+{%- endif -%}
