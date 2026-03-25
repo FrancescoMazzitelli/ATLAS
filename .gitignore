@@ -176,6 +176,7 @@ run/
 # keep data out of main repo
 *data/
 working/
+cache/
 
 # anything related to testing
 test*
