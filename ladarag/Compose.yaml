@@ -247,7 +247,19 @@ services:
       catalog-gateway:
         condition: service_healthy
 
+  nominatim:
+    image: mediagis/nominatim:5.2
+    container_name: nominatim
+    environment:
+      - PBF_URL=https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf
+    ports:
+      - "5803:8080"
+    volumes:
+      - nominatim-data:/var/lib/postgresql/16/main
+
+
 volumes:
   mongo-data:
   qdrant-data:
   postgres-data:
+  nominatim-data:
