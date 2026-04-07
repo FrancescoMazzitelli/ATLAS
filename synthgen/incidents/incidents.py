@@ -10,7 +10,6 @@ from typing import Dict, List
 from requests import Response
 
 ENV_PATH = dotenv.find_dotenv()
-SCRAPE_ENV_PATH = "./SCRAPER.sh"
 
 # API vars
 BASE_URL = dotenv.get_key(ENV_PATH, "TOMTOM_BASE_URL")
@@ -18,7 +17,7 @@ API_KEY = dotenv.get_key(ENV_PATH, "TOMTOM_API_KEY")
 BBOX = dotenv.get_key(ENV_PATH, "CHICAGO_BBOX")
 
 # SCRAPER vars
-SCRAPER_PATH = dotenv.get_key(SCRAPE_ENV_PATH, "SCRAPER_PATH")
+SCRAPER_PATH = dotenv.get_key(ENV_PATH, "SCRAPER_PATH")
 
 
 def default_request(url, params: Dict[str, str]|None = None) -> Response|None:
