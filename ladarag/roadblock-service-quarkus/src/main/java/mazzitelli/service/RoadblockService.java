@@ -1,6 +1,7 @@
 package mazzitelli.service;
 
 import mazzitelli.controller.RoadblockController;
+import mazzitelli.model.Input;
 import mazzitelli.model.Location;
 import mazzitelli.model.payload.CatalogPayload;
 import mazzitelli.model.payload.Check;
@@ -15,10 +16,14 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -74,14 +79,19 @@ public class RoadblockService implements RoadblockController {
         return "http://" + gatewayHost + ":" + gatewayPort + "";
     }
 
+    private final ObjectMapper mapper = new ObjectMapper();
+
     @Override
     public Response healthCheck() {
         return Response.ok("{\"status\":\"ALIVE\"}").build();
     }
 
     @Override
-    public Response computeAlternativePath(List<Location> locations) {
+    public Response computeAlternativePath(Input request) {
         try {
+            List<Location> locations = request.getLocations();
+            OffsetDateTime timestamp = OffsetDateTime.parse(request.getTimestamp());
+
             log.info("1. Building the initial request...");
             String initialRequest = buildValhallaRequest(locations, new ArrayList<>());
 
@@ -92,7 +102,7 @@ public class RoadblockService implements RoadblockController {
             List<Location> routePoints = decodeRoutePoints(initialRouteJson);
 
             log.info("4. Retrieving from postgis locations near the ones extracted...");
-            List<Location> avoidLocations = queryRoadblocksNearRoute(routePoints);
+            List<String> avoidLocations = queryRoadblocksNearRoute(routePoints, timestamp);
 
             log.info("5. Building the final request...");
             String finalRequest = buildValhallaRequest(locations, avoidLocations);
@@ -110,131 +120,178 @@ public class RoadblockService implements RoadblockController {
         }
     }
 
-    private String buildValhallaRequest(List<Location> locations, List<Location> avoidLocations) {
+
+    private String buildValhallaRequest(List<Location> locations,
+                                         List<String> excludePolygons) {
+
         StringBuilder sb = new StringBuilder();
         sb.append("{");
+
         sb.append("\"locations\":[");
         for (int i = 0; i < locations.size(); i++) {
-            Location loc = locations.get(i);
-            sb.append("{\"lat\":").append(loc.lat)
-              .append(",\"lon\":").append(loc.lon).append("}");
+            Location l = locations.get(i);
+            sb.append("{\"lat\":").append(l.lat)
+              .append(",\"lon\":").append(l.lon).append("}");
             if (i < locations.size() - 1) sb.append(",");
         }
         sb.append("],");
+
         sb.append("\"costing\":\"auto\",");
-        sb.append("\"directions_options\":{");
-        sb.append("\"units\":\"km\",\"language\":\"en-US\"");
-        sb.append("},");
-        sb.append("\"shape_format\":\"polyline6\",");
-        sb.append("\"shape_attributes\":[\"edge.id\",\"edge.speed\",\"edge.length\"],");
-        sb.append("\"avoid_locations\":[");
-        for (int i = 0; i < avoidLocations.size(); i++) {
-            Location loc = avoidLocations.get(i);
-            sb.append("{\"lat\":").append(loc.lat)
-              .append(",\"lon\":").append(loc.lon).append("}");
-            if (i < avoidLocations.size() - 1) sb.append(",");
+
+        // EXCLUDE POLYGONS (fix completo)
+        if (excludePolygons != null && !excludePolygons.isEmpty()) {
+            sb.append("\"exclude_polygons\":[");
+
+            for (int i = 0; i < excludePolygons.size(); i++) {
+                sb.append(excludePolygons.get(i));
+                if (i < excludePolygons.size() - 1) sb.append(",");
+            }
+
+            sb.append("],");
         }
-        sb.append("]");
+
+        sb.append("\"directions_options\":{\"units\":\"km\",\"language\":\"en-US\"},");
+        sb.append("\"shape_format\":\"polyline6\"");
         sb.append("}");
+
         return sb.toString();
     }
 
-    private String callValhalla(String jsonBody) throws Exception {
+    private String callValhalla(String body) throws Exception {
         HttpClient client = HttpClient.newHttpClient();
-        HttpRequest request = HttpRequest.newBuilder()
+
+        HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(getValhallaUrl()))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
-        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        return response.body();
+
+        return client.send(req, HttpResponse.BodyHandlers.ofString()).body();
     }
 
-    private List<Location> decodeRoutePoints(String valhallaJson) {
-        List<Location> routePoints = new ArrayList<>();
-        try {
-            ObjectMapper mapper = new ObjectMapper();
-            ValhallaResponse response = mapper.readValue(valhallaJson, ValhallaResponse.class);
+    private List<Location> decodeRoutePoints(String json) throws Exception {
+        List<Location> out = new ArrayList<>();
+        ValhallaResponse r = mapper.readValue(json, ValhallaResponse.class);
 
-            if (response.trip != null && response.trip.legs != null) {
-                for (ValhallaLeg leg : response.trip.legs) {
-                    if (leg.shape != null && !leg.shape.isEmpty()) {
-                        routePoints.addAll(decodePolyline6(leg.shape));
-                    }
+        if (r.trip != null && r.trip.legs != null) {
+            for (ValhallaLeg leg : r.trip.legs) {
+                if (leg.shape != null) {
+                    out.addAll(decodePolyline6(leg.shape));
                 }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
         }
-        return routePoints;
+        return out;
     }
 
     private List<Location> decodePolyline6(String encoded) {
-        List<Location> points = new ArrayList<>();
-        int index = 0, lat = 0, lon = 0;
+        List<Location> pts = new ArrayList<>();
+        int i = 0, lat = 0, lon = 0;
 
-        while (index < encoded.length()) {
-            int[] resultLat = decodeNext(encoded, index);
-            lat += resultLat[0];
-            index = resultLat[1];
+        while (i < encoded.length()) {
+            int[] a = decodeNext(encoded, i);
+            lat += a[0];
+            i = a[1];
 
-            int[] resultLon = decodeNext(encoded, index);
-            lon += resultLon[0];
-            index = resultLon[1];
+            int[] b = decodeNext(encoded, i);
+            lon += b[0];
+            i = b[1];
 
-            Location loc = new Location();
-            loc.lat = lat / 1e6;
-            loc.lon = lon / 1e6;
-            points.add(loc);
+            Location l = new Location();
+            l.lat = lat / 1e6;
+            l.lon = lon / 1e6;
+            pts.add(l);
         }
-        return points;
+        return pts;
     }
 
-    private int[] decodeNext(String encoded, int start) {
+    private int[] decodeNext(String enc, int start) {
         int result = 0, shift = 0, b;
-        int index = start;
+        int i = start;
 
         do {
-            b = encoded.charAt(index++) - 63;
+            b = enc.charAt(i++) - 63;
             result |= (b & 0x1f) << shift;
             shift += 5;
         } while (b >= 0x20);
 
         int delta = ((result & 1) != 0) ? ~(result >> 1) : (result >> 1);
-        return new int[]{delta, index};
+        return new int[]{delta, i};
     }
 
-    private List<Location> queryRoadblocksNearRoute(List<Location> route) throws SQLException {
-        List<Location> avoidLocations = new ArrayList<>();
-        if (route.isEmpty()) return avoidLocations;
+    private List<String> queryRoadblocksNearRoute(List<Location> route, OffsetDateTime ts) throws SQLException {
 
-        try (Connection conn = DriverManager.getConnection(postgisJdbc, postgisUser, postgisPassword)) {
-            StringBuilder pointsArray = new StringBuilder();
-            for (int i = 0; i < route.size(); i++) {
-                Location loc = route.get(i);
-                pointsArray.append("ST_MakePoint(").append(loc.lon).append(",").append(loc.lat).append(")");
-                if (i < route.size() - 1) pointsArray.append(", ");
-            }
+        List<String> polygons = new ArrayList<>();
+        if (route.isEmpty()) return polygons;
 
-            String sql = "SELECT ST_Y(geom) AS lat, ST_X(geom) AS lon " +
-                         "FROM roadblock " +
-                         "WHERE ST_DWithin(" +
-                         "  geom::geography, " +
-                         "  ST_SetSRID(ST_MakeLine(ARRAY[" + pointsArray + "]), 4326)::geography, " +
-                         "  50" +
-                         ")";
+        OffsetDateTime dayStart = ts.toLocalDate().atStartOfDay().atOffset(ts.getOffset());
+        OffsetDateTime dayEnd = dayStart.plusDays(1).minusNanos(1);
 
-            try (PreparedStatement stmt = conn.prepareStatement(sql);
-                 ResultSet rs = stmt.executeQuery()) {
-                while (rs.next()) {
-                    Location avoid = new Location();
-                    avoid.lat = rs.getDouble("lat");
-                    avoid.lon = rs.getDouble("lon");
-                    avoidLocations.add(avoid);
+        String line = buildLineString(route);
+
+        String sql =
+                "WITH filtered AS ( " +
+                "  SELECT geom FROM roadblock " +
+                "  WHERE \"startTime\" <= ? " +
+                "    AND (\"endTime\" IS NULL OR \"endTime\" >= ?) " +
+                "    AND ST_DWithin( " +
+                "      geom::geography, " +
+                "      ST_GeogFromText(?), " +
+                "      50 " +
+                "    ) " +
+                "), merged AS ( " +
+                "  SELECT ST_ConvexHull(ST_Union(geom)) AS geom FROM filtered " +
+                ") " +
+                "SELECT ST_AsGeoJSON(geom) AS geojson FROM merged";
+
+        try (Connection c = DriverManager.getConnection(postgisJdbc, postgisUser, postgisPassword);
+             PreparedStatement st = c.prepareStatement(sql)) {
+
+            st.setObject(1, dayEnd);
+            st.setObject(2, dayStart);
+            st.setString(3, line);
+
+            ResultSet rs = st.executeQuery();
+
+            while (rs.next()) {
+                String geojson = rs.getString("geojson");
+                if (geojson != null) {
+                    try {
+                        polygons.add(convertGeoJsonToValhalla(geojson));
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 }
             }
         }
-        return avoidLocations;
+
+        if (polygons.size() > 3) {
+            polygons = polygons.subList(0, 3);
+        }
+
+        return polygons;
+    }
+
+    private String convertGeoJsonToValhalla(String geojson) throws Exception {
+
+        Map g = mapper.readValue(geojson, Map.class);
+        Map geom = (Map) g.get("geometry");
+
+        List coords = (List) geom.get("coordinates");
+
+        return mapper.writeValueAsString(coords);
+    }
+
+    private String buildLineString(List<Location> route) {
+        StringBuilder sb = new StringBuilder("LINESTRING(");
+
+        for (int i = 0; i < route.size(); i++) {
+            Location l = route.get(i);
+            sb.append(l.lon).append(" ").append(l.lat);
+            if (i < route.size() - 1) sb.append(", ");
+        }
+
+        sb.append(")");
+        return sb.toString();
     }
 
     public Response register() {

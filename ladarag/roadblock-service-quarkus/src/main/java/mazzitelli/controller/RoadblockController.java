@@ -1,12 +1,10 @@
 package mazzitelli.controller;
 
-import java.util.List;
-
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.*;
-import mazzitelli.model.Location;
+import mazzitelli.model.Input;
 
 @Path("/roadblock")
 public interface RoadblockController {
@@ -23,7 +21,7 @@ public interface RoadblockController {
     @Produces(MediaType.APPLICATION_JSON)
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Given a list of coordinates, calculates the optimal route while avoiding roads closed due to construction or emergencies.")
-    public Response computeAlternativePath(List<Location> locations);
+    public Response computeAlternativePath(Input request);
 
     @POST
     @Path("/register")

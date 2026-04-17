@@ -98,7 +98,7 @@ services:
     volumes:
       - ./custom_files:/custom_files
     environment:
-      - tile_urls=https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf
+      - tile_urls=https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
       - build_elevation=True
       - build_admins=False
       - build_time_zones=False
@@ -252,7 +252,7 @@ services:
     image: mediagis/nominatim:5.2
     container_name: nominatim
     environment:
-      - PBF_URL=https://download.geofabrik.de/europe/italy/sud-latest.osm.pbf
+      - PBF_URL=https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
     ports:
       - "5803:8080"
     volumes:

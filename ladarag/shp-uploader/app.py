@@ -6,27 +6,32 @@ import shapefile
 import psycopg2
 from psycopg2 import sql
 from flask import Flask, request, jsonify, render_template_string
+from datetime import datetime, date
+import re
 
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100 MB
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+
+
+# ---------------------------------------------------------------------------
+# DATABASE
+# ---------------------------------------------------------------------------
 
 def _load_databases():
     raw = os.environ.get('DB_CONNECTIONS')
-    if raw:
-        return json.loads(raw)
+    return json.loads(raw) if raw else {}
 
 DATABASES = _load_databases()
 
 
-# ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
 def get_conn(label=None):
     cfg = DATABASES.get(label) or next(iter(DATABASES.values()))
     return psycopg2.connect(
-        host=cfg['host'], port=cfg['port'], dbname=cfg['dbname'],
-        user=cfg['user'], password=cfg['password'],
+        host=cfg['host'],
+        port=cfg['port'],
+        dbname=cfg['dbname'],
+        user=cfg['user'],
+        password=cfg['password'],
     )
 
 def get_schemas(label=None):
@@ -43,18 +48,10 @@ def get_schemas(label=None):
         return schemas
     except Exception:
         return ['public']
-
-
+    
 # ---------------------------------------------------------------------------
-# Shapefile helpers
+# SHAPE HELPERS
 # ---------------------------------------------------------------------------
-
-SHAPE_TYPES = {
-    0:'Null', 1:'Point', 3:'Polyline', 5:'Polygon',
-    8:'MultiPoint', 11:'PointZ', 13:'PolylineZ', 15:'PolygonZ',
-    18:'MultiPointZ', 21:'PointM', 23:'PolylineM', 25:'PolygonM',
-    28:'MultiPointM', 31:'MultiPatch',
-}
 
 def find_file(directory, extension):
     for root, _, files in os.walk(directory):
@@ -63,63 +60,181 @@ def find_file(directory, extension):
                 return os.path.join(root, fn)
     return None
 
+
 def detect_srid(prj_path):
     if not prj_path or not os.path.exists(prj_path):
         return None
     c = open(prj_path).read()
-    if 'WGS_1984' in c or 'WGS 1984' in c: return 4326
-    if 'ETRS' in c:                          return 4258
-    if 'Monte_Mario' in c:                   return 3003
-    if 'RGF93' in c:                         return 2154
+    if 'WGS_1984' in c or 'WGS 1984' in c:
+        return 4326
+    if 'ETRS' in c:
+        return 4258
+    if 'Monte_Mario' in c:
+        return 3003
+    if 'RGF93' in c:
+        return 2154
     return None
 
+
+# ---------------------------------------------------------------------------
+# GEOMETRY
+# ---------------------------------------------------------------------------
+
 def geom_to_wkt(shape):
-    """Convert a pyshp shape to WKT string."""
     t = shape.shapeType
 
-    # --- Point ---
     if t in (1, 11, 21):
         x, y = shape.points[0]
         return f'POINT({x} {y})'
 
-    # --- MultiPoint ---
     if t in (8, 18, 28):
         pts = ', '.join(f'{x} {y}' for x, y in shape.points)
         return f'MULTIPOINT({pts})'
 
-    # --- Polyline → MULTILINESTRING ---
     if t in (3, 13, 23):
         parts = shape.parts + [len(shape.points)]
         rings = []
         for i in range(len(parts) - 1):
-            pts = shape.points[parts[i]:parts[i+1]]
+            pts = shape.points[parts[i]:parts[i + 1]]
             rings.append('(' + ', '.join(f'{x} {y}' for x, y in pts) + ')')
         return 'MULTILINESTRING(' + ', '.join(rings) + ')'
 
-    # --- Polygon → MULTIPOLYGON ---
     if t in (5, 15, 25):
         parts = shape.parts + [len(shape.points)]
-        rings = ['(' + ', '.join(f'{x} {y}' for x, y in shape.points[parts[i]:parts[i+1]]) + ')'
-                 for i in range(len(parts) - 1)]
-        # First ring = exterior, rest = holes; wrap as single polygon
-        if len(rings) == 1:
-            return f'MULTIPOLYGON(({rings[0]}))'
-        exterior = rings[0]
-        holes    = ', '.join(rings[1:])
-        return f'MULTIPOLYGON(({exterior}, {holes}))'
+        rings = []
+        for i in range(len(parts) - 1):
+            pts = shape.points[parts[i]:parts[i + 1]]
+            rings.append('(' + ', '.join(f'{x} {y}' for x, y in pts) + ')')
+        return 'MULTIPOLYGON((' + ', '.join(rings) + '))'
 
-    return None  # unsupported / null shape
+    return None
 
-def pg_type(dbf_type):
-    """Map DBF field type to PostgreSQL column type."""
-    return {
-        'C': 'TEXT',
-        'N': 'NUMERIC',
-        'F': 'DOUBLE PRECISION',
-        'L': 'BOOLEAN',
-        'D': 'DATE',
-        'M': 'TEXT',
-    }.get(dbf_type, 'TEXT')
+
+# ---------------------------------------------------------------------------
+# TYPE INFERENCE (FULL)
+# ---------------------------------------------------------------------------
+
+TS_FORMATS = [
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+    "%d/%m/%Y %H:%M:%S",
+    "%d/%m/%Y %H:%M",
+]
+
+DATE_FORMATS = [
+    "%Y%m%d",
+    "%Y-%m-%d",
+    "%d/%m/%Y",
+]
+
+
+def try_parse_date(v):
+    for f in DATE_FORMATS:
+        try:
+            return datetime.strptime(v, f).date()
+        except:
+            pass
+    return None
+
+
+def try_parse_ts(v):
+    v = v.replace("Z", "").replace(" ", "T")
+    for f in TS_FORMATS:
+        try:
+            return datetime.strptime(v, f)
+        except:
+            pass
+    return None
+
+
+def infer_type(values):
+    has_int = True
+    has_float = False
+    has_bool = True
+    has_date = True
+    has_ts = True
+
+    for v in values:
+        if v is None:
+            continue
+
+        v = str(v).strip()
+        if v == "":
+            continue
+
+        # BOOLEAN
+        if v.lower() not in ("true", "false", "t", "f", "1", "0", "yes", "no"):
+            has_bool = False
+
+        # NUMERIC
+        try:
+            if "." in v:
+                float(v)
+                has_int = False
+                has_float = True
+            else:
+                int(v)
+        except:
+            has_int = False
+
+        # DATE
+        if not try_parse_date(v):
+            has_date = False
+
+        # TIMESTAMP
+        if not try_parse_ts(v):
+            has_ts = False
+
+    if has_ts:
+        return "TIMESTAMP"
+    if has_date:
+        return "DATE"
+    if has_float:
+        return "DOUBLE PRECISION"
+    if has_int:
+        return "INTEGER"
+    if has_bool:
+        return "BOOLEAN"
+    return "TEXT"
+
+
+# ---------------------------------------------------------------------------
+# VALUE CONVERSION
+# ---------------------------------------------------------------------------
+
+def convert_value(value, typ):
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return None
+
+    try:
+        if typ == "INTEGER":
+            return int(float(value))
+
+        if typ == "DOUBLE PRECISION":
+            return float(value)
+
+        if typ == "BOOLEAN":
+            return str(value).lower() in ("true", "t", "1", "yes", "y")
+
+        if typ == "DATE":
+            d = try_parse_date(str(value))
+            return d
+
+        if typ == "TIMESTAMP":
+            ts = try_parse_ts(str(value))
+            return ts
+
+        return str(value)
+
+    except:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -405,143 +520,156 @@ onDbChange();
 """
 
 # ---------------------------------------------------------------------------
-# Routes
+# ROUTES
 # ---------------------------------------------------------------------------
 
-@app.route('/')
+@app.route("/")
 def index():
     return render_template_string(HTML, databases=list(DATABASES.keys()))
 
+@app.route("/preview", methods=["POST"])
+def preview():
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "no file"})
+
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = os.path.join(tmp, "file.zip")
+        f.save(zip_path)
+
+        with zipfile.ZipFile(zip_path) as z:
+            z.extractall(tmp)
+
+        shp = find_file(tmp, ".shp")
+        if not shp:
+            return jsonify({"error": "no shp found"})
+
+        sf = shapefile.Reader(shp)
+
+        fields = sf.fields[1:]
+        records = list(sf.iterShapeRecords())
+
+        sample = records[:min(len(records), 100)]
+
+        # infer types
+        col_types = {}
+        for i, fld in enumerate(fields):
+            vals = [r.record[i] for r in sample]
+            col_types[fld[0]] = infer_type(vals)
+
+        # preview rows
+        preview_rows = []
+        for r in sample:
+            row = {}
+            for i, fld in enumerate(fields):
+                row[fld[0]] = r.record[i]
+            preview_rows.append(row)
+
+        return jsonify({
+            "n_records": len(records),
+            "fields": [{"name": f[0], "type": col_types[f[0]]} for f in fields],
+            "records": preview_rows,
+            "shape_type": records[0].shape.shapeType if records else None,
+            "srid": 4326
+        })
+
 @app.route('/databases', methods=['GET'])
 def list_databases():
-    """Return available DB labels and their schemas."""
     result = {}
     for label in DATABASES.keys():
         result[label] = get_schemas(label)
     return jsonify(result)
 
-
-@app.route('/preview', methods=['POST'])
-def preview():
-    f = request.files.get('file')
-    if not f:
-        return jsonify({'error': 'No file received'})
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            zip_path = os.path.join(tmpdir, 'upload.zip')
-            f.save(zip_path)
-            with zipfile.ZipFile(zip_path) as z:
-                z.extractall(tmpdir)
-
-            shp_file = find_file(tmpdir, '.shp')
-            if not shp_file:
-                return jsonify({'error': 'No .shp file found inside the ZIP'})
-
-            prj_file = find_file(os.path.dirname(shp_file), '.prj')
-            srid     = detect_srid(prj_file)
-
-            sf      = shapefile.Reader(shp_file)
-            fields  = [{'name': f[0], 'type': f[1]} for f in sf.fields[1:]]  # skip DeletionFlag
-            records = []
-            for sr in sf.iterShapeRecords():
-                row = {fields[i]['name']: str(sr.record[i]) for i in range(len(fields))}
-                records.append(row)
-                if len(records) >= 100:
-                    break
-
-            return jsonify({
-                'fields':     fields,
-                'records':    records,
-                'n_records':  len(sf),
-                'shape_type': SHAPE_TYPES.get(sf.shapeType, f'Type {sf.shapeType}'),
-                'srid':       srid,
-            })
-    except Exception as e:
-        return jsonify({'error': str(e)})
-
-
-@app.route('/import', methods=['POST'])
+@app.route("/import", methods=["POST"])
 def import_shp():
     import time
-    f             = request.files.get('file')
-    table         = request.form.get('table', '').strip()
-    schema        = request.form.get('schema', 'public').strip()
-    srid          = request.form.get('srid', '4326').strip()
-    mode          = request.form.get('mode', 'create')
-    spatial_index = request.form.get('spatial_index', '1') == '1'
 
-    db_label      = request.form.get('db', None)
+    f = request.files.get("file")
+    table = request.form.get("table", "").strip()
+    schema = request.form.get("schema", "public")
+    srid = int(request.form.get("srid", "4326"))
+    db_label = request.form.get("db")
 
     if not f or not table:
-        return jsonify({'error': 'Missing parameters'})
+        return jsonify({"error": "missing params"})
 
     t0 = time.time()
+
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            zip_path = os.path.join(tmpdir, 'upload.zip')
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = os.path.join(tmp, "file.zip")
             f.save(zip_path)
+
             with zipfile.ZipFile(zip_path) as z:
-                z.extractall(tmpdir)
+                z.extractall(tmp)
 
-            shp_file = find_file(tmpdir, '.shp')
-            if not shp_file:
-                return jsonify({'error': 'No .shp file found inside the ZIP'})
+            shp = find_file(tmp, ".shp")
+            if not shp:
+                return jsonify({"error": "no shp found"})
 
-            sf     = shapefile.Reader(shp_file)
-            fields = sf.fields[1:]  # skip DeletionFlag: [name, type, size, decimal]
+            sf = shapefile.Reader(shp)
+            fields = sf.fields[1:]
 
+            records = list(sf.iterShapeRecords())
+            sample = records[:min(len(records), 300)]
+
+            # ---------------- TYPE INFERENCE ----------------
+            col_types = {}
+
+            for i, f in enumerate(fields):
+                values = [r.record[i] for r in sample]
+                col_types[f[0]] = infer_type(values)
+
+            # ---------------- DB ----------------
             conn = get_conn(db_label)
-            cur  = conn.cursor()
+            cur = conn.cursor()
 
             full_table = sql.Identifier(schema, table)
 
-            # --- Handle import mode ---
-            if mode == 'replace':
-                cur.execute(sql.SQL('DROP TABLE IF EXISTS {}').format(full_table))
+            # create table
+            cols = []
+            for name, typ in col_types.items():
+                cols.append(f'"{name}" {typ}')
 
-            if mode in ('create', 'replace'):
-                col_defs = ', '.join(
-                    f'"{f[0]}" {pg_type(f[1])}' for f in fields
-                )
-                cur.execute(sql.SQL(
-                    'CREATE TABLE {} (gid SERIAL PRIMARY KEY, {} , geom GEOMETRY)'
-                ).format(full_table, sql.SQL(col_defs)))
+            cur.execute(sql.SQL(
+                "CREATE TABLE IF NOT EXISTS {} (gid SERIAL PRIMARY KEY, {}, geom GEOMETRY)"
+            ).format(full_table, sql.SQL(", ".join(cols))))
 
-            # --- Insert rows ---
-            col_names = ', '.join(f'"{f[0]}"' for f in fields)
-            placeholders = ', '.join(['%s'] * len(fields))
-            insert_sql = sql.SQL(
-                'INSERT INTO {} ({}, geom) VALUES ({}, ST_GeomFromText(%s, {}))'
-            ).format(
-                full_table,
-                sql.SQL(col_names),
-                sql.SQL(placeholders),
-                sql.Literal(int(srid))
-            )
+            # insert
+            col_names = ", ".join(f'"{f[0]}"' for f in fields)
+            placeholders = ", ".join(["%s"] * len(fields))
+
+            insert = sql.SQL(
+                "INSERT INTO {} ({}, geom) VALUES ({}, ST_GeomFromText(%s, %s))"
+            ).format(full_table, sql.SQL(col_names), sql.SQL(placeholders))
 
             count = 0
-            for sr in sf.iterShapeRecords():
-                wkt = geom_to_wkt(sr.shape)
-                if wkt is None:
-                    continue
-                values = [str(v) if v is not None else None for v in sr.record]
-                cur.execute(insert_sql, values + [wkt])
-                count += 1
 
-            # --- Spatial index ---
-            if spatial_index:
-                cur.execute(sql.SQL(
-                    'CREATE INDEX ON {} USING GIST (geom)'
-                ).format(full_table))
+            for r in records:
+                geom = geom_to_wkt(r.shape)
+                if not geom:
+                    continue
+
+                vals = [
+                    convert_value(r.record[i], col_types[fields[i][0]])
+                    for i in range(len(fields))
+                ]
+
+                cur.execute(insert, vals + [geom, srid])
+                count += 1
 
             conn.commit()
             conn.close()
 
-            return jsonify({'imported': count, 'elapsed': round(time.time() - t0, 2)})
+            return jsonify({
+                "imported": count,
+                "elapsed": round(time.time() - t0, 2),
+                "columns": col_types
+            })
 
     except Exception as e:
-        return jsonify({'error': str(e)})
+        return jsonify({"error": str(e)})
 
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
