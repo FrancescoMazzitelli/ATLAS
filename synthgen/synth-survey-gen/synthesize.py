@@ -299,7 +299,7 @@ class _queryRewriteTool(lr.agent.ToolMessage):
         return [
             cls(question="How does the Lyon mobility survey define commute trips?")
         ]
-    
+
 class _ladaragTool(lr.agent.ToolMessage):
     """
     Marker class — exported so SurveyEngine can import it if needed.

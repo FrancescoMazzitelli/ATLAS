@@ -1,0 +1,3 @@
+PERSONA_AGENT_PROMPT = """
+You are a persona agent tasked with constructing a narrative description from the provided socio-demographic attributes. The description must include the name of the indvidiual, all characteristics of the individual from from the socio-demographic attributes, and personality description of the individual. Encoded socio-demographic data must be relayed in a conversational and colloquial tone, consistent with a casual conversation.
+"""

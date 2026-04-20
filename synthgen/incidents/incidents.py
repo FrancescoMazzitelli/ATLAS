@@ -4,10 +4,15 @@ import os
 import json
 import shutil
 import copy
+import pandas as pd
+import geopandas as gpd
 import datetime
 from pathlib import Path
 from typing import Dict, List
 from requests import Response
+from shapely import LineString, Point
+from pandas import DataFrame
+from geopandas import GeoDataFrame
 
 ENV_PATH = dotenv.find_dotenv()
 
@@ -167,6 +172,53 @@ def scrape():
 
     _write_incidents(SCRAPER_PATH, "aggregated_incidents.json", new_aggregated_incidents)
     print("\nUpdated aggregated incidents completed.")
+
+
+def get_incidents(DATA_PATH: str|None = SCRAPER_PATH) -> GeoDataFrame:
+    assert SCRAPER_PATH is not None
+    AGGREGATE_INCIDENTS_PATH = Path(SCRAPER_PATH) / "aggregated_incidents.json"
+    with open(AGGREGATE_INCIDENTS_PATH, "r") as fp:
+        aggregated_incidents_json = json.load(fp)
+
+    df = pd.json_normalize(
+        aggregated_incidents_json,
+    )
+
+    col_names = {col:col.split(".")[-1] for col in df.columns}
+    df.rename(columns=col_names, inplace=True)
+    geometry = [LineString(line) for line in df["coordinates"].values]
+    gdf = GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
+
+    return gdf
+
+
+def prepare_incidents(points:bool=True):
+    gdf = get_incidents()
+
+    gdf_prepared = gdf.copy()
+
+    gdf_prepared["description"] = gdf["events"].apply(lambda x: x[0]["description"])
+    gdf_prepared = gdf_prepared.drop(labels=[
+        "type", "roadNumbers", "numberOfReports",
+        "lastReportTime", "events", "tmc", "coordinates",
+        "countryCode", "tableNumber", "tableVersion", "direction", "points"
+        ], axis=1)
+
+    if points:
+        gdf_prepared = line_to_points(gdf_prepared)
+
+    return gdf_prepared
+
+
+
+def line_to_points(gdf: GeoDataFrame):
+    rows = []
+    for _, row in gdf.iterrows():
+        for coord in row.geometry.coords:
+            new_row = row.to_dict()
+            new_row['geometry'] = Point(coord)
+            rows.append(new_row)
+    return gpd.GeoDataFrame(rows, crs=gdf.crs)
 
 
 if __name__ == "__main__":
