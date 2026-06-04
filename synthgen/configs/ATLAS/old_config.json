@@ -1,6 +1,6 @@
 {
     "model": {
-        "chat_model": "ollama/llama3.2:latest",
+        "chat_model": "ollama/llama3.1:8b",
         "chat_context_length": 16000,
         "temperature": 0.5
     },

@@ -177,6 +177,7 @@ run/
 *data/
 working/
 cache/
+run/
 
 # anything related to testing
 test*

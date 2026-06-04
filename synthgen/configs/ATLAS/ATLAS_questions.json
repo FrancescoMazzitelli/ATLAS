@@ -1,0 +1,60 @@
+{
+  "EVENT_1_HOME": {
+    "question": "You are at home beginning your daily commute. Determine if you should reflect and plan on your commute or begin.",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "PLAN",
+      "ACTION_2": "PROCEED"
+    }
+  },
+  "EVENT_HOME_TO_WORK_DISRUPTION": {
+    "question": "You are now traveling to work. The following disruption occurs. Determine if you proceed as planned",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "PLAN",
+      "ACTION_2": "REFLECT"
+    }
+  },
+  "EVENT_2_WORK": {
+    "question": "You have completed work and are ready to commute. Is there anything you would like to do before returning home?",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "YES",
+      "ACTION_2": "NO",
+      "ACTION_3": "REFLECT"
+    }
+  },
+  "EVENT_WORK_TO_DISCRETIONARY_DISRUPTION": {
+    "question": "You have decided to travel somewhere after work. Do you now where you want to go?",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "YES",
+      "ACTION_2": "NO"
+    }
+  },
+  "EVENT_3_DISCRETIONARY": {
+    "question": "After work, the next planned activity is discretionary. Determine whether the person participates in a discretionary activity.",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "PLAN",
+      "ACTION_2": "REFLECT"
+    }
+  },
+  "EVENT_DISCRETIONARY_TO_HOME_DISRUPTION": {
+    "question": "You are arriving home and encounter a disruption. Do you proceed with the route you planned?",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "YES",
+      "ACTION_2": "NO",
+      "ACTION_3": "REFLECT"
+    }
+  },
+  "EVENT_4_HOME": {
+    "question": "You have returned home! Would you like to relax, or reflect on your travel for the day.",
+    "dtype": "TEXT",
+    "response": {
+      "ACTION_1": "RELAX",
+      "ACTION_2": "REFLECT"
+    }
+  }
+}

@@ -1,5 +1,6 @@
 import pandas as pd
 import geopandas as gpd
+import re
 from geopandas import GeoDataFrame
 from shapely import Point
 import json
@@ -310,6 +311,85 @@ class _ladaragTool(lr.agent.ToolMessage):
     request: str = "ladaragQuery"
     question: str
 
+class _completeEventTool(lr.agent.ToolMessage):
+    request: str = "completeEvent"
+    purpose: str = """
+        To signal the end of the current event and indicate how to proceed.
+        Use <ACTION> to choose how to conclude the event before moving to the next one.
+        You MUST SELECT AN <ACTION> to end the event.
+        """
+    ACTION: str  # "PROCEED", "YES", "NO", "REFLECT", "SKIP", "REPEAT"
+
+    @classmethod
+    def example(cls):
+        return [
+            cls(ACTION="PROCEED"),
+            (
+                "I have finished this event and want to move on",
+                cls(ACTION="PROCEED")
+            ),
+            (
+                "I want to reflect on this event before continuing",
+                cls(ACTION="REFLECT")
+            ),
+            (
+                "I do not want to participate in this event",
+                cls(ACTION="NO")
+            )
+        ]
+
+
+class _timeSelectTool(lr.agent.ToolMessage):
+    request: str = "timeSelect"
+    purpose: str = """
+        To respond with a time value in HH:MM format when specifying
+        a departure time or an arrival deadline.
+        """
+    TIME: str  # "HH:MM"
+
+    @classmethod
+    def example(cls):
+        return [
+            cls(TIME="08:30"),
+            (
+                "I depart for work at 7:45 in the morning",
+                cls(TIME="07:45")
+            ),
+            (
+                "I need to arrive by 5:15 in the afternoon",
+                cls(TIME="17:15")
+            )
+        ]
+
+class _ladragNavTool(lr.agent.ToolMessage):
+    request: str = "ladragNav"
+    purpose: str = """
+        To look up navigation details using the LADRAG app.
+        Use when the agent needs to find or confirm a location or travel time.
+        - If the location is UNFAMILIAR, input the full plaintext address.
+        - If checking travel time to a WELL-KNOWN location (school, work, or home),
+          use one of the saved favorites: "SCHOOL", "WORK", or "HOME".
+        """
+    DESTINATION: str  # Full plaintext address OR one of: "SCHOOL", "WORK", "HOME"
+
+    @classmethod
+    def example(cls):
+        return [
+            cls(DESTINATION="1234 Elm Street, Los Angeles, CA 90001"),
+            (
+                "I need to find directions to a new grocery store",
+                cls(DESTINATION="8720 S Sepulveda Blvd, Los Angeles, CA 90045")
+            ),
+            (
+                "I want to check how long it takes to get to work",
+                cls(DESTINATION="WORK")
+            ),
+            (
+                "I need to know the travel time to my kid's school",
+                cls(DESTINATION="SCHOOL")
+            )
+        ]
+
 class SurveyAgent(lr.ChatAgent):
     """
     Subclasses Langroid's Chat Agent Class for LLM interfacing and
@@ -346,6 +426,9 @@ class SurveyAgent(lr.ChatAgent):
         # survey logging
         self.survey_complete: bool
         self.survey_failed: bool
+
+        # ATLAS ADDONS
+        self.event_action: str | None = None
 
     def queue_question(self, variable: str, question_package: Dict[str, str | Dict[int, str]], shuffle_response: bool = False):
         """Takes a question/response
@@ -385,20 +468,50 @@ class SurveyAgent(lr.ChatAgent):
     def ask_question(self):
         self.llm_response(self.queued_question)
 
-    def singleAnswerResponse(self, msg: _singleAnswerTool) -> str:
-        # return answer if exists in queued keys
-        self.dtype_matches.append("TEXT" == self.question_dtypes[-1])
-        return str(msg.TEXT if msg.TEXT in self.queued_keys else None)
+    def completeEvent(self, msg: _completeEventTool) -> str:
+        valid = {"PROCEED", "YES", "NO", "REFLECT", "PLAN"}
+        if msg.ACTION not in valid:
+            return f"Invalid ACTION '{msg.ACTION}'. Must be one of: {', '.join(sorted(valid))}."
+        self.event_action = msg.ACTION
+        return f"Event concluded with ACTION={msg.ACTION}. Advancing to next event."
 
-    def multipleAnswerResponse(self, msg: _multipleAnswerTool):
-        self.dtype_matches.append("TEXT" == self.question_dtypes[-1])
-        return str(
-            _multipleAnswerTool.TEXT if all(
-                key in self.queued_keys for key in _multipleAnswerTool.TEXT) else None)
+    def timeSelect(self, msg: _timeSelectTool) -> str:
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", msg.TIME):
+            return f"Invalid time '{msg.TIME}'. Must be HH:MM in 24-hour format."
+        self.answer_response = msg.TIME
+        return f"Time recorded: {msg.TIME}"
 
-    def discreteNumericResponse(self, msg: _discreteNumericTool):
-        self.dtype_matches.append("NUMERIC" == self.question_dtypes[-1])
-        return str(msg.NUMERIC if msg.NUMERIC not in self.queued_keys else None)
+    def ladragNav(self, msg: _ladragNavTool) -> str:
+        favorites = {"SCHOOL", "WORK", "HOME"}
+        dest = msg.DESTINATION.strip()
+
+        if dest.upper() in favorites:
+            self.answer_response = dest.upper()
+            return f"LADRAG: Routing to saved favorite '{dest.upper()}'."
+        elif len(dest) > 5:  # basic sanity check for a real address
+            self.answer_response = dest
+            return f"LADRAG: Routing to address '{dest}'."
+        else:
+            return (
+                f"Invalid DESTINATION '{dest}'. "
+                "Provide a full address or one of: SCHOOL, WORK, HOME."
+            )
+
+
+    # def singleAnswerResponse(self, msg: _singleAnswerTool) -> str:
+    #     # return answer if exists in queued keys
+    #     self.dtype_matches.append("TEXT" == self.question_dtypes[-1])
+    #     return str(msg.TEXT if msg.TEXT in self.queued_keys else None)
+
+    # def multipleAnswerResponse(self, msg: _multipleAnswerTool):
+    #     self.dtype_matches.append("TEXT" == self.question_dtypes[-1])
+    #     return str(
+    #         _multipleAnswerTool.TEXT if all(
+    #             key in self.queued_keys for key in _multipleAnswerTool.TEXT) else None)
+
+    # def discreteNumericResponse(self, msg: _discreteNumericTool):
+    #     self.dtype_matches.append("NUMERIC" == self.question_dtypes[-1])
+    #     return str(msg.NUMERIC if msg.NUMERIC not in self.queued_keys else None)
 
 
 def build_agents(config_folder:str, n: int, source: str, subsample: int | None = None, **kwargs):
