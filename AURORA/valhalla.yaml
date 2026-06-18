@@ -1,0 +1,19 @@
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:3.7.0
+    container_name: valhalla
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./custom_files:/custom_files
+    environment:
+      - tile_urls=https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
+      - build_elevation=True
+      - build_admins=False
+      - build_time_zones=False
+      - server_threads=4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 60s
+      retries: 150

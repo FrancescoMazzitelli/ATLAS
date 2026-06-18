@@ -1,0 +1,53 @@
+# AURORA — Autonomous Urban Reasoning and Optimized Routing Adaptation
+# All simulation parameters in one place. No code changes needed.
+
+# ─── Routing Engine (Valhalla) ─────────────────────────────────────
+valhalla:
+  host: "localhost"
+  port: 8002
+  timeout: 30
+
+# ─── Language Model ─────────────────────────────────────────────────
+llm:
+  provider: "ollama"
+  model: "qwen3.5:4b"
+  temperature: 0.5
+  base_url: "http://localhost:11434"
+
+# ─── Data Source ────────────────────────────────────────────────────
+data:
+  agents_file: "data/agents.jsonl"
+  locations: "data/locations.json"
+  num_agents: 50
+
+# ─── Simulation ─────────────────────────────────────────────────────
+simulation:
+  log_level: "INFO"
+  recursion_limit: 100
+  disruption_probability: 0.3
+  disruption_files:
+    - "data/disruptions.json"
+  clock:
+    start_datetime: "2019-07-17T07:00:00"
+    tick_duration_minutes: 5
+    max_ticks: 288
+
+# ─── Path Decomposition ─────────────────────────────────────────────
+path:
+  step_km: 1.0
+
+# ─── Traffic ─────────────────────────────────────────────────────────
+traffic:
+  csv_dir: "traffic"
+  jam_density_per_km: 50.0
+  docker_container: ""
+  valhalla_config: "/etc/valhalla/valhalla.json"
+  container_traffic_dir: "/traffic"
+
+# ─── Output ──────────────────────────────────────────────────────────
+output:
+  dir: "output"
+  generate_map: true
+  map_zoom: 12
+  center_lat: 41.8781
+  center_lon: -87.6298
