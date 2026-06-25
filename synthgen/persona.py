@@ -124,6 +124,8 @@ def generate_population_descriptions(
     population_sample = synthesize_population(
         config_folder=config_folder,
         n_sample=n_sample,
+        min_age=18,
+        max_age=65
     )
     population_sample = population_sample[population_sample.AGEP.astype(int)>18]
 
