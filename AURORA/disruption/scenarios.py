@@ -1,4 +1,3 @@
-import random
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -74,7 +73,7 @@ class Disruption:
     def _desc(self) -> str:
         t = TEMPLATES.get(self.type, {}).get(self.severity, f"{self.type.value} near ({self.location[0]:.4f}, {self.location[1]:.4f})")
         road = self.affected_road or "a major artery"
-        venue = random.choice(CHICAGO_VENUES) if "venue" in t else ""
+        venue = CHICAGO_VENUES[0] if "venue" in t else ""
         return t.format(road=road, venue=venue)
 
 
@@ -89,20 +88,18 @@ class DisruptionInjector:
                  origin: Optional[Tuple[float, float]] = None,
                  destination: Optional[Tuple[float, float]] = None) -> Disruption:
         self._counter += 1
-        type = type or random.choice(list(DisruptionType))
-        severity = severity or random.choices(SEVERITY, weights=[0.3, 0.4, 0.2, 0.1], k=1)[0]
+        type = type or DisruptionType.ACCIDENT
+        severity = severity or "moderate"
         if location is None and origin and destination:
-            f = random.uniform(0.2, 0.8)
-            location = (origin[0] + (destination[0] - origin[0]) * f + random.uniform(-0.01, 0.01),
-                        origin[1] + (destination[1] - origin[1]) * f + random.uniform(-0.01, 0.01))
-        location = location or (41.8781 + random.uniform(-0.05, 0.05), -87.6298 + random.uniform(-0.05, 0.05))
+            location = ((origin[0] + destination[0]) / 2,
+                        (origin[1] + destination[1]) / 2)
+        location = location or (41.8781, -87.6298)
 
-        dur_min = random.uniform(30, 180)
         e = Disruption(event_id=f"d_{self._counter}", type=type, severity=severity, location=location,
-                       affected_road=random.choice(CHICAGO_ROADS),
+                       affected_road=CHICAGO_ROADS[0],
                        radius_meters={"minor": 200, "moderate": 500, "severe": 1000, "critical": 2000}.get(severity, 500),
                        start_datetime=datetime.now(),
-                       end_datetime=datetime.now() + timedelta(minutes=dur_min),
+                       end_datetime=datetime.now() + timedelta(minutes=60),
                        affects_auto=True,
                        affects_transit=type in (DisruptionType.TRANSIT_DISRUPTION, DisruptionType.FLOODING, DisruptionType.WEATHER))
         logger.info(f"Generated {severity} {type.value} at ({location[0]:.4f}, {location[1]:.4f}) on {e.affected_road}")
@@ -110,10 +107,7 @@ class DisruptionInjector:
 
     def inject(self, origin: Tuple[float, float], destination: Tuple[float, float],
                probability: float = 0.3) -> List[Disruption]:
-        if random.random() > probability:
-            return []
-        n = random.choices([1, 2], weights=[0.7, 0.3], k=1)[0]
-        events = [self.generate(origin=origin, destination=destination) for _ in range(n)]
+        events = [self.generate(origin=origin, destination=destination)]
         self.active.extend(events)
         return events
 

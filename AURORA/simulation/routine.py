@@ -1,5 +1,4 @@
 import numpy as np
-import random
 import logging
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
@@ -79,7 +78,7 @@ class RoutineGenerator:
         return schedule
 
     def _estimate_commute(self, o: Location, d: Location) -> float:
-        return max(15.0, min(90.0, self._dist(o, d) / 40 * 60 + random.uniform(-5, 10)))
+        return max(15.0, min(90.0, self._dist(o, d) / 40 * 60))
 
     @staticmethod
     def _dist(o: Location, d: Location) -> float:

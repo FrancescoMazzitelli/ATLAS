@@ -2,7 +2,6 @@ import requests
 import json
 import logging
 import math
-import random
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -168,13 +167,14 @@ class ValhallaEngine:
                         disable_hierarchy=False,
                         extra_opts={"shortest": True}), "route_shortest")
 
-        # 5. Multiple avoid-point routes (force different corridors via random midpoints)
+        # 5. Multiple avoid-point routes (force different corridors via midpoints)
         cz_avoid = [(lat, lon) for lat, lon, _, _ in congestion_zones] if congestion_zones else None
         for i in range(n * 3):
             if len(routes) >= n:
                 break
-            mid = ((origin[0] + destination[0]) / 2 + random.uniform(-0.03, 0.03),
-                   (origin[1] + destination[1]) / 2 + random.uniform(-0.03, 0.03))
+            offset = (i - n) * 0.01
+            mid = ((origin[0] + destination[0]) / 2 + offset,
+                   (origin[1] + destination[1]) / 2 + offset)
             extra_avoid = [mid]
             if cz_avoid:
                 extra_avoid.extend(cz_avoid)
@@ -272,7 +272,7 @@ class ValhallaEngine:
 
         routes = []
         for i in range(n):
-            f = 0.8 + i * 0.3 + random.uniform(-0.1, 0.2)
+            f = 0.8 + i * 0.3
             dur = base_dur * f * congestion_mult
             near_cz = 0
             if congestion_zones:
@@ -283,9 +283,9 @@ class ValhallaEngine:
                     if dist < cz_r + 2000:
                         near_cz += 1
             if near_cz > 0:
-                cl = "heavy" if near_cz > 2 else ("moderate" if near_cz > 1 else "moderate")
+                cl = "heavy" if near_cz > 2 else "moderate"
             else:
-                cl = random.choice(["light", "moderate"])
+                cl = "moderate"
             routes.append(Route(
                 route_id=f"route_{i + 1}", mode="auto",
                 duration_seconds=dur, length_km=base_len * f,

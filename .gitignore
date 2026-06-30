@@ -174,7 +174,6 @@ run/
 *.html
 
 # keep data out of main repo
-*data/
 working/
 cache/
 run/

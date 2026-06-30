@@ -2,7 +2,6 @@ import logging
 import json
 import argparse
 import os
-import random
 from typing import Optional, Tuple
 
 from agentic.core.models import SociodemographicProfile, Location
@@ -36,8 +35,6 @@ def _load_agents_from_jsonl(
     default_work_lat = float(default_work[1])
     default_work_lon = float(default_work[2])
 
-    rng = random.Random(42)
-
     entries = []
     with open(jsonl_path) as f:
         for line in f:
@@ -48,23 +45,20 @@ def _load_agents_from_jsonl(
     if max_agents:
         entries = entries[:max_agents]
 
-    # Map location type to coordinates
     def _resolve_coords(loc_type: str, entry: dict) -> Tuple[float, float, str]:
         puma = int(entry["PUMA"])
         if loc_type == "HOME":
             hoods = puma_nb.get(puma, list(neighborhoods.keys()))
-            name = rng.choice(hoods)
+            name = hoods[0] if hoods else list(neighborhoods.keys())[0]
             lat, lon = neighborhoods.get(name, (default_work_lat, default_work_lon))
-            lat += rng.uniform(-0.008, 0.008)
-            lon += rng.uniform(-0.008, 0.008)
             return lat, lon, name
         elif loc_type in ("WORK", "SCHOOL"):
             occ_key = "Education/Legal" if loc_type == "SCHOOL" else "Management/Business"
             options = occ_loc.get(occ_key, [(default_work_name, default_work_lat, default_work_lon)])
-            name, lat, lon = rng.choice(options)
-            return float(lat) + rng.uniform(-0.005, 0.005), float(lon) + rng.uniform(-0.005, 0.005), name
+            name, lat, lon = options[0]
+            return float(lat), float(lon), name
         else:
-            return default_work_lat + rng.uniform(-0.01, 0.01), default_work_lon + rng.uniform(-0.01, 0.01), "Misc"
+            return default_work_lat, default_work_lon, "Misc"
 
     agent_list = []
     for entry in entries:
