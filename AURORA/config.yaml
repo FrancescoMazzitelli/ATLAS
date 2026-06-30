@@ -5,7 +5,7 @@
 valhalla:
   host: "localhost"
   port: 8002
-  timeout: 30
+  timeout: 60
 
 # ─── Language Model ─────────────────────────────────────────────────
 llm:
@@ -14,10 +14,16 @@ llm:
   temperature: 0.5
   base_url: "http://localhost:11434"
 
+# ─── Nominatim Geocoding (optional container) ───────────────────────
+nominatim:
+  host: "localhost"
+  port: 8080
+  timeout: 60
+
 # ─── Data Source ────────────────────────────────────────────────────
 data:
   agents_file: "data/agents.jsonl"
-  locations: "data/locations.json"
+  locations: ""
   num_agents: 50
 
 # ─── Simulation ─────────────────────────────────────────────────────
@@ -26,7 +32,7 @@ simulation:
   recursion_limit: 100
   disruption_probability: 0.3
   disruption_files:
-    - "data/disruptions.json"
+    - "data/disruptions.jsonl"
   clock:
     start_datetime: "2019-07-17T07:00:00"
     tick_duration_minutes: 5

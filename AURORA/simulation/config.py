@@ -44,9 +44,16 @@ class PathConfig:
 
 
 @dataclass
+class NominatimConfig:
+    host: str = ""
+    port: int = 8080
+    timeout: int = 10
+
+
+@dataclass
 class DataConfig:
     agents_file: str = "output.jsonl"
-    locations: str = "data/locations.json"
+    locations: str = ""
     num_agents: int = 50
 
 
@@ -100,6 +107,7 @@ class OutputConfig:
 class Config:
     valhalla: ValhallaConfig = field(default_factory=ValhallaConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    nominatim: NominatimConfig = field(default_factory=NominatimConfig)
     data: DataConfig = field(default_factory=DataConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
     path: PathConfig = field(default_factory=PathConfig)
@@ -125,6 +133,7 @@ def load_config(path: str = "config.yaml") -> Config:
     cfg = Config()
     cfg.valhalla = _dict_to_dataclass(raw.get("valhalla", {}), ValhallaConfig)
     cfg.llm = _dict_to_dataclass(raw.get("llm", {}), LLMConfig)
+    cfg.nominatim = _dict_to_dataclass(raw.get("nominatim", {}), NominatimConfig)
     cfg.data = _dict_to_dataclass(raw.get("data", {}), DataConfig)
     raw_sim = raw.get("simulation", {})
     if isinstance(raw_sim.get("clock"), dict):

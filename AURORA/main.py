@@ -9,32 +9,18 @@ from simulation.engine import SimulationEngine
 from simulation.recorder import SimulationRecorder
 from simulation.clock import SimulationClock
 from simulation.config import load_config
+from geocoding.nominatim import NominatimClient
 
 
-def _load_locations(path: str) -> dict:
-    if not path or not os.path.exists(path):
-        logging.warning(f"Locations file not found: {path}")
-        return {}
-    with open(path) as f:
-        return json.load(f)
+CHICAGO_DEFAULT = (41.8781, -87.6298)
+CHICAGO_HOME_DEFAULT = (41.88, -87.63)
 
 
 def _load_agents_from_jsonl(
     jsonl_path: str,
-    loc_path: str,
     max_agents: Optional[int] = None,
+    nominatim: Optional[NominatimClient] = None,
 ) -> list:
-    with open(loc_path) as f:
-        loc = json.load(f)
-
-    neighborhoods = {n[0]: (float(n[1]), float(n[2])) for n in loc.get("neighborhoods", [])}
-    puma_nb = {int(k): v for k, v in loc.get("puma_neighborhoods", {}).items()}
-    occ_loc = loc.get("occupation_locations", {})
-    default_work = loc.get("default_work", ["Workplace", 41.882, -87.630])
-    default_work_name = default_work[0]
-    default_work_lat = float(default_work[1])
-    default_work_lon = float(default_work[2])
-
     entries = []
     with open(jsonl_path) as f:
         for line in f:
@@ -45,40 +31,44 @@ def _load_agents_from_jsonl(
     if max_agents:
         entries = entries[:max_agents]
 
-    def _resolve_coords(loc_type: str, entry: dict) -> Tuple[float, float, str]:
-        puma = int(entry["PUMA"])
-        if loc_type == "HOME":
-            hoods = puma_nb.get(puma, list(neighborhoods.keys()))
-            name = hoods[0] if hoods else list(neighborhoods.keys())[0]
-            lat, lon = neighborhoods.get(name, (default_work_lat, default_work_lon))
-            return lat, lon, name
-        elif loc_type in ("WORK", "SCHOOL"):
-            occ_key = "Education/Legal" if loc_type == "SCHOOL" else "Management/Business"
-            options = occ_loc.get(occ_key, [(default_work_name, default_work_lat, default_work_lon)])
-            name, lat, lon = options[0]
-            return float(lat), float(lon), name
-        else:
-            return default_work_lat, default_work_lon, "Misc"
+    def _entry_coords(entry: dict, loc_type: str, idx: int) -> Tuple[float, float, str]:
+        itinerary = entry.get("itinerary", {})
+        coords = itinerary.get("coordinates")
+        if coords and idx < len(coords):
+            c = coords[idx]
+            lat = float(c.get("lat", c.get("y", CHICAGO_DEFAULT[0])))
+            lon = float(c.get("lon", c.get("lng", c.get("x", CHICAGO_DEFAULT[1]))))
+            name = None
+            if nominatim:
+                name = nominatim.reverse_name(lat, lon)
+            return lat, lon, name or f"{loc_type.lower()}_{idx}"
+
+        locs = itinerary.get("locations", [])
+        if idx < len(locs):
+            _type = locs[idx]
+            if _type == "HOME":
+                return (CHICAGO_HOME_DEFAULT[0], CHICAGO_HOME_DEFAULT[1], "Home")
+            elif _type in ("WORK", "SCHOOL"):
+                return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Workplace")
+        return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Misc")
 
     agent_list = []
     for entry in entries:
         aid = f"agent_{entry['agent_idx']:04d}"
-        bio = entry["self_introduction"]
-        locs = entry["itinerary"]["locations"]
-        contexts = entry["itinerary"]["location_context"]
+        bio = entry.get("self_introduction", "")
+        locs = entry.get("itinerary", {}).get("locations", [])
+        contexts = entry.get("itinerary", {}).get("location_context", [])
 
         if not locs:
             continue
 
-        # Resolve coordinates for each location in itinerary
         resolved = []
-        for lt in locs:
-            lat, lon, name = _resolve_coords(lt, entry)
+        for i, lt in enumerate(locs):
+            lat, lon, name = _entry_coords(entry, lt, i)
             resolved.append((lt, lat, lon, name))
 
         home = Location(f"h_{aid}", resolved[0][3], resolved[0][1], resolved[0][2], "home")
 
-        # Determine if agent has work/school or discretionary activities
         has_work = "WORK" in locs or "SCHOOL" in locs
         has_disc = "DISCRETIONARY" in locs
         occ = None
@@ -107,8 +97,8 @@ def _load_agents_from_jsonl(
             "bio": bio,
             "itinerary": list(zip(locs, contexts, resolved)),
             "personality": {
-                "self_intro": entry["self_introduction"],
-                "travel_plans": entry["travel_plans_summary"],
+                "self_intro": entry.get("self_introduction", ""),
+                "travel_plans": entry.get("travel_plans_summary", ""),
                 "context": list(zip(locs, contexts)),
             },
         })
@@ -212,10 +202,18 @@ def main():
 
     max_n = args.population if args.population > 0 else None
 
+    nominatim = None
+    if cfg.nominatim.host:
+        nominatim = NominatimClient(
+            host=cfg.nominatim.host,
+            port=cfg.nominatim.port,
+            timeout=cfg.nominatim.timeout,
+        )
+
     agent_list = _load_agents_from_jsonl(
-        cfg.data.agents_file or "output.jsonl",
-        cfg.data.locations or "data/locations.json",
+        cfg.data.agents_file or "data/agents.jsonl",
         max_agents=max_n or cfg.data.num_agents,
+        nominatim=nominatim,
     )
 
     if args.list_agents:

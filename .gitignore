@@ -37,7 +37,6 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
-htmlcov/
 .tox/
 .nox/
 .coverage
@@ -171,7 +170,6 @@ cython_debug/
 # project
 run/
 .run*
-*.html
 
 # keep data out of main repo
 working/

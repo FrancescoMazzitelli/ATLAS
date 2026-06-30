@@ -1,0 +1,42 @@
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:3.7.0
+    container_name: valhalla
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./custom_files:/custom_files
+    environment:
+      - tile_urls=https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
+      - build_elevation=True
+      - build_admins=False
+      - build_time_zones=False
+      - server_threads=4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/status"]
+      interval: 30s
+      timeout: 60s
+      retries: 150
+
+  nominatim:
+    image: mediagis/nominatim:4.5
+    container_name: nominatim
+    ports:
+      - "8083:8083"
+    volumes:
+      - nominatim-data:/var/lib/postgresql/14/main
+    environment:
+      - PBF_URL=https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
+      - REPLICATION_URL=https://download.geofabrik.de/north-america/us/illinois-updates
+      - FREEZE=true
+    shm_size: 2g
+    cap_add:
+      - SYS_PTRACE
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 120s
+      retries: 30
+
+volumes:
+  nominatim-data:
