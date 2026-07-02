@@ -1,0 +1,59 @@
+narrative: |
+  You are an expert social scientist who builds realistic synthetic human personas from census demographic data.
+  Your output will be used as the system-prompt context for a separate roleplaying agent, so the persona description must be written in second person.
+
+  Steps:
+  - Read all provided socio-demographic attributes carefully.
+  - Infer a realistic name, occupation, home location type, and personal history consistent with the demographics.
+  - Imagine a plausible previous day: what happened at work or home, how interactions went, what stressed or pleased them, what they're thinking about.
+  - Consider their current mood state ({mood}) and how it colors their perspective.
+  - Compose a character narrative that establishes: who they are, their circumstances, what happened yesterday, and how that shapes what they might do and feel today.
+
+  Output instructions:
+  - The description field must be written in second person ('Yesterday you...', 'You felt...', 'You ended up...', 'Today you're thinking about...').
+  - Use concrete, specific details and emotional resonance — avoid vague generalities or demographic stereotypes.
+  - Keep the description to 5-7 sentences: paint a vivid picture of the person and their current state of mind.
+  - Every detail must be internally consistent with the provided demographic data.
+  - Focus on emotional and mental state carry-over: what from yesterday lingers, what they're preoccupied with, how their mood influences their outlook for the day ahead.
+
+  Demographic profile: {description}{demographic_instruction}
+
+intro: |
+  You generate contextual self-introductions for synthetic personas used in travel-diary simulations.
+  Your output will be part of a roleplaying agent's persona context, so it must be written in first person and authentically reflect their character.
+
+  Steps:
+  - Review both the demographic profile and the persona narrative provided.
+  - Craft an authentic first-person introduction that reflects their background, personality, and current state of mind.
+  - Include subtle hints about their lifestyle, values, or recent experiences that might influence travel behavior.
+
+  Output instructions:
+  - Write in first person as the character ('I'm...', 'I've always...', 'I tend to...').
+  - Use specific details from their background—occupation, interests, family situation, location.
+  - Keep it to 2-3 sentences: enough to establish voice and personality without exhaustive autobiography.
+  - The introduction should feel natural and personal, not generic.
+
+  Demographic profile: {description}
+  Persona narrative: {narrative}
+
+diary: |
+  Based on this person's profile and introduction, create a travel diary for their day. Start and end at HOME.
+
+  Demographic profile: {description}
+
+  Narrative: {narrative}
+
+  Introduction: {intro}
+
+  Generate exactly this JSON format (no other text):
+  {{"locations": ["HOME", "WORK", "HOME"], "contexts": ["morning routine", "8-hour shift", "evening at home"], "departures": ["08:00", "17:30"]}}
+
+  Rules:
+  1. locations: array of [HOME, WORK, SCHOOL, or DISCRETIONARY] - must start with HOME
+  2. contexts: string explanation for each location - must match locations length
+  3. departures: times in HH:MM - must be one less than locations (no departure from first HOME)
+  4. Times: between 06:00-23:00, at least 1 hour apart
+  5. No same location twice in a row
+  6. At least 3 locations total
+
+  Return ONLY valid JSON, nothing else.

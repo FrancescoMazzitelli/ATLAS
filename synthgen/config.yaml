@@ -1,9 +1,17 @@
-model:
-  chat_model: "gpt-4"
-  chat_context_length: 8000
-  temperature: 0.5
-  max_tokens: 2048
-  api_type: "openai"
+ollama:
+  model: "gemma4:e4b"
+  temperature: 0.7
+  top_p: 0.9
+  num_predict: 8192
+  timeout_seconds: 120  # timeout for each LLM call
+  max_retries: 2  # retries on timeout or error
+
+agents:
+  n_sample: 3
+  demographic_inclusion: "both"  # "narrative" | "footer" | "both"
+  demographic_inclusion_percent: 0.6  # if "narrative" or "both": percentage of demographics to weave into narrative text
+  demographic_inclusion_in_intros_diaries: "narrative"  # "none" | "narrative" | "footer" | "both" - whether to include demographic context when generating intros and diaries
+  checkpoint_frequency: 20  # cache/checkpoint combined agents.json every N agents (0 to disable)
 
 synth:
   source: "US"
@@ -18,3 +26,6 @@ data:
 survey:
   min_age: 18
   max_age: 65
+
+mood:
+  neutral: 1.0
