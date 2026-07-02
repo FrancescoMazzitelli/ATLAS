@@ -1,5 +1,4 @@
 # project specific
-data*
 mydailytravel/
 
 # Byte-compiled / optimized / DLL files
@@ -191,7 +190,6 @@ private/
 
 # ignore custom local files
 custom_files/
-ladarag/custom_files/
 
 # python cache
 __pycache__/

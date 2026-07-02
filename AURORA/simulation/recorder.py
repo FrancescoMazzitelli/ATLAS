@@ -94,32 +94,38 @@ class SimulationRecorder:
         self,
         tick: int,
         timestamp: str,
-        agent_states: List[Any],
+        agent_snapshots: List[Any],
         traffic_edges: List[Dict[str, Any]],
         congestion_zones: List[Dict[str, Any]],
+        traffic_snapshot: Any = None,
     ):
         record = TickRecord(tick=tick, timestamp=timestamp)
-        for as_ in agent_states:
-            edge_count = 0
-            completed = getattr(as_, "completed_journeys", [])
-            if completed:
-                edges = completed[-1].get("route_edges", []) if completed else []
-                edge_count = len(edges)
-
+        for snap in agent_snapshots:
             state = {
-                "position": list(as_.position) if as_.position else None,
-                "destination": list(as_.destination) if as_.destination else None,
-                "is_traveling": as_.is_traveling,
-                "arrived": as_.is_done,
-                "step_count": sum(j.get("step_count", 0) for j in getattr(as_, "completed_journeys", [])),
-                "route_edge_count": edge_count,
-                "schedule_status": as_.schedule.status_at(datetime.fromisoformat(timestamp)) if as_.schedule else {"type": "unknown"},
+                "position": list(snap.position) if snap.position else None,
+                "destination": list(snap.destination) if snap.destination else None,
+                "is_traveling": snap.is_traveling,
+                "arrived": snap.is_done,
+                "speed_kph": round(snap.speed_kph, 1),
+                "current_edge_id": snap.current_edge_id,
+                "progress_pct": round(snap.progress_pct, 1),
+                "schedule_status": snap.schedule_status if hasattr(snap, 'schedule_status') else {"type": "unknown"},
             }
-            record.agents[as_.agent_id] = state
+            record.agents[snap.agent_id] = state
 
-        tick_data = {"tick": tick, "timestamp": timestamp, "agents": record.agents,
-                     "traffic_edges": len(traffic_edges),
-                     "congestion_zones": len(congestion_zones)}
+        tick_data = {
+            "tick": tick, "timestamp": timestamp,
+            "agents": record.agents,
+            "traffic_edges": len(traffic_edges),
+            "congestion_zones": len(congestion_zones),
+        }
+        if traffic_snapshot:
+            tick_data["traffic_metrics"] = {
+                "total_vehicles": traffic_snapshot.total_vehicles,
+                "mean_speed_kph": round(traffic_snapshot.mean_speed_kph, 1),
+                "mean_density": round(traffic_snapshot.mean_density_veh_per_km, 2),
+                "los_summary": traffic_snapshot.los_summary,
+            }
         self._tick_logger.info(json.dumps(tick_data))
         self.ticks.append(record)
 
@@ -139,7 +145,7 @@ class SimulationRecorder:
             "status": decision.get("status", ""),
             "position": decision.get("current_position"),
             "chosen_route_id": decision.get("chosen_segment") or decision.get("chosen_route"),
-            "alternatives_considered": len(decision.get("segments", decision.get("alternatives", []))),
+            "alternatives_considered": len(decision.get("current_alternatives", [])),
             "disruption_encountered": decision.get("disruption_encountered", False),
             "congestion_zones_active": len(decision.get("congestion_zones", [])),
             "reasoning": reasoning,
@@ -156,7 +162,6 @@ class SimulationRecorder:
             self.agents[agent_id].total_steps = steps
             self.agents[agent_id].total_distance_km = distance_km
             if journey:
-                # Store only what's needed: gold_shape, gold_maneuvers, steps
                 self.agents[agent_id].journey = {
                     "gold_shape": journey.get("gold_shape", []),
                     "gold_maneuvers": journey.get("gold_maneuvers", []),
@@ -196,13 +201,14 @@ class SimulationRecorder:
                     "lon": state.get("position", [None, None])[1] if state.get("position") else None,
                     "is_traveling": state.get("is_traveling"),
                     "arrived": state.get("arrived"),
-                    "step_count": state.get("step_count"),
-                    "route_edge_count": state.get("route_edge_count"),
+                    "speed_kph": state.get("speed_kph"),
+                    "current_edge_id": state.get("current_edge_id"),
+                    "progress_pct": state.get("progress_pct"),
                 })
         with open(path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["tick", "timestamp", "agent_id", "lat", "lon",
-                                                    "is_traveling", "arrived", "step_count",
-                                                    "route_edge_count"])
+                                                    "is_traveling", "arrived", "speed_kph",
+                                                    "current_edge_id", "progress_pct"])
             writer.writeheader()
             writer.writerows(rows)
         logger.info(f"Saved tick CSV to {path} ({len(rows)} rows)")

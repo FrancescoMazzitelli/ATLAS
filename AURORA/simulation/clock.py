@@ -7,10 +7,11 @@ logger = logging.getLogger(__name__)
 
 class SimulationClock:
     def __init__(self, start_datetime: datetime,
-                 tick_duration_minutes: int = 5,
-                 max_ticks: int = 288):
+                 tick_duration_seconds: int = 1,
+                 max_ticks: int = 86400):
         self.start_datetime = start_datetime
-        self.tick_duration = timedelta(minutes=tick_duration_minutes)
+        self.tick_duration = timedelta(seconds=tick_duration_seconds)
+        self.tick_duration_seconds = tick_duration_seconds
         self.max_ticks = max_ticks
         self._current_tick = 0
 
@@ -35,3 +36,6 @@ class SimulationClock:
 
     def fraction_complete(self) -> float:
         return self._current_tick / self.max_ticks if self.max_ticks > 0 else 0.0
+
+    def seconds_since_start(self) -> int:
+        return self._current_tick * self.tick_duration_seconds

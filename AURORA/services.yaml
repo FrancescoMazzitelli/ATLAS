@@ -22,7 +22,7 @@ services:
     image: mediagis/nominatim:4.5
     container_name: nominatim
     ports:
-      - "8083:8083"
+      - "8083:8080"
     volumes:
       - nominatim-data:/var/lib/postgresql/14/main
     environment:

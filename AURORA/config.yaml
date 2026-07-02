@@ -3,21 +3,22 @@
 
 # ─── Routing Engine (Valhalla) ─────────────────────────────────────
 valhalla:
-  host: "localhost"
+  host: "137.121.163.115"
   port: 8002
   timeout: 60
 
 # ─── Language Model ─────────────────────────────────────────────────
 llm:
   provider: "ollama"
-  model: "qwen3.5:4b"
+  model: "qwen3.6:35b"
   temperature: 0.5
   base_url: "http://localhost:11434"
+  num_predict: 4096
 
 # ─── Nominatim Geocoding (optional container) ───────────────────────
 nominatim:
-  host: "localhost"
-  port: 8080
+  host: "137.121.163.115"
+  port: 8083
   timeout: 60
 
 # ─── Data Source ────────────────────────────────────────────────────
@@ -28,15 +29,22 @@ data:
 
 # ─── Simulation ─────────────────────────────────────────────────────
 simulation:
+  seed: 42
   log_level: "INFO"
   recursion_limit: 100
-  disruption_probability: 0.3
   disruption_files:
-    - "data/disruptions.jsonl"
+    - "data/disruptions.json"
   clock:
     start_datetime: "2019-07-17T07:00:00"
     tick_duration_minutes: 5
-    max_ticks: 288
+    tick_duration_seconds: 1
+    max_ticks: 86400
+
+# ─── Discretionary Activities ──────────────────────────────────────
+discretionary:
+  enabled: true
+  social_invitation: "A colleague from work invites you to grab a beer after work. You had planned to {context}. What do you do?"
+  accept_probability: 0.5
 
 # ─── Path Decomposition ─────────────────────────────────────────────
 path:
@@ -49,6 +57,7 @@ traffic:
   docker_container: ""
   valhalla_config: "/etc/valhalla/valhalla.json"
   container_traffic_dir: "/traffic"
+  traffic_backup_dir: "traffic_backup"
 
 # ─── Output ──────────────────────────────────────────────────────────
 output:

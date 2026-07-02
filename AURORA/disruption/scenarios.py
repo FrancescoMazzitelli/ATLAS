@@ -53,6 +53,8 @@ class Disruption:
     end_datetime: Optional[datetime] = None
     affects_auto: bool = True
     affects_transit: bool = False
+    cause: str = ""
+    weather: str = "CLEAR"
 
     def is_active_at(self, dt: datetime) -> bool:
         if self.start_datetime and dt < self.start_datetime:
@@ -68,7 +70,8 @@ class Disruption:
                 "radius_meters": self.radius_meters,
                 "start_datetime": self.start_datetime.isoformat() if self.start_datetime else None,
                 "end_datetime": self.end_datetime.isoformat() if self.end_datetime else None,
-                "affects_auto": self.affects_auto, "affects_transit": self.affects_transit}
+                "affects_auto": self.affects_auto, "affects_transit": self.affects_transit,
+                "cause": self.cause, "weather": self.weather}
 
     def _desc(self) -> str:
         t = TEMPLATES.get(self.type, {}).get(self.severity, f"{self.type.value} near ({self.location[0]:.4f}, {self.location[1]:.4f})")

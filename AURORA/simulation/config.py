@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 class ClockConfig:
     start_datetime: str = "2019-07-17T07:00:00"
     tick_duration_minutes: int = 5
+    tick_duration_seconds: int = 1
     max_ticks: int = 288
 
 
@@ -27,15 +28,23 @@ class LLMConfig:
     model: str = "llama3.2"
     temperature: float = 0.5
     base_url: str = "http://localhost:11434"
+    num_predict: int = 4096
 
 
 @dataclass
 class SimulationConfig:
+    seed: int = 42
     log_level: str = "INFO"
     recursion_limit: int = 50
-    disruption_probability: float = 0.3
     disruption_files: List[str] = field(default_factory=list)
     clock: ClockConfig = field(default_factory=ClockConfig)
+
+
+@dataclass
+class DiscretionaryConfig:
+    enabled: bool = True
+    social_invitation: str = "A colleague from work invites you to grab a beer after work. You had planned to {context}. What do you do?"
+    accept_probability: float = 0.5
 
 
 @dataclass
@@ -92,6 +101,7 @@ class TrafficConfig:
     docker_container: str = ""
     valhalla_config: str = "/etc/valhalla/valhalla.json"
     container_traffic_dir: str = "/traffic"
+    traffic_backup_dir: str = "traffic_backup"
 
 
 @dataclass
@@ -110,6 +120,7 @@ class Config:
     nominatim: NominatimConfig = field(default_factory=NominatimConfig)
     data: DataConfig = field(default_factory=DataConfig)
     simulation: SimulationConfig = field(default_factory=SimulationConfig)
+    discretionary: DiscretionaryConfig = field(default_factory=DiscretionaryConfig)
     path: PathConfig = field(default_factory=PathConfig)
     traffic: TrafficConfig = field(default_factory=TrafficConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -139,6 +150,7 @@ def load_config(path: str = "config.yaml") -> Config:
     if isinstance(raw_sim.get("clock"), dict):
         raw_sim["clock"] = ClockConfig(**raw_sim["clock"])
     cfg.simulation = _dict_to_dataclass(raw_sim, SimulationConfig)
+    cfg.discretionary = _dict_to_dataclass(raw.get("discretionary", {}), DiscretionaryConfig)
     cfg.path = _dict_to_dataclass(raw.get("path", {}), PathConfig)
     cfg.traffic = _dict_to_dataclass(raw.get("traffic", {}), TrafficConfig)
     cfg.output = _dict_to_dataclass(raw.get("output", {}), OutputConfig)

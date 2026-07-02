@@ -37,6 +37,7 @@ def _call_llm(
     system: str,
     user: str,
     tools: List,
+    num_predict: int = 4096,
 ) -> List[Dict]:
     """Call Ollama via /api/generate, strip <think> tags & thinking field,
     parse tool calls from response text.
@@ -91,7 +92,7 @@ Respond ONLY with the JSON object — no explanation, no thinking, no analysis. 
         "prompt": augmented_user,
         "format": "json",
         "stream": False,
-        "options": {"temperature": temperature},
+        "options": {"temperature": temperature, "num_predict": num_predict},
     }
 
     try:
@@ -247,11 +248,18 @@ def _format_segments(segments: List[Dict]) -> str:
 def _format_disruptions(disruptions: List[Dict]) -> str:
     if not disruptions:
         return "No disruptions nearby."
-    return "\n".join(
-        f"  [{d['severity'].upper()}] {d['type']}: {d.get('description','')} "
-        f"({d['lat']:.4f}, {d['lon']:.4f}) radius={d['radius_meters']}m"
-        for d in disruptions
-    )
+    lines = []
+    for d in disruptions:
+        extra = ""
+        if d.get("cause"):
+            extra += f" | cause: {d['cause']}"
+        if d.get("weather") and d["weather"] not in ("CLEAR", "UNKNOWN"):
+            extra += f" | weather: {d['weather']}"
+        lines.append(
+            f"  [{d['severity'].upper()}] {d['type']}: {d.get('description','')} "
+            f"({d['lat']:.4f}, {d['lon']:.4f}) radius={d['radius_meters']}m{extra}"
+        )
+    return "\n".join(lines)
 
 def _format_congestion(zones: List[Dict]) -> str:
     if not zones:
@@ -398,17 +406,6 @@ def query_maneuver_node(state: JourneyState, valhalla: ValhallaEngine) -> Journe
         alt_list.append(ctx)
     state["current_alternatives"] = alt_list
 
-    route_edges = []
-    for r in routes:
-        for p in r.shape:
-            if getattr(p, 'edge_id', None) and p.edge_id > 0:
-                route_edges.append({
-                    "edge_id": p.edge_id,
-                    "speed": getattr(p, 'speed', 50) or 50,
-                    "length_m": 100,
-                })
-    state["route_edges"] = route_edges
-
     # Log alternatives in detail
     instr = _format_gold_instruction(maneuver)
     state["log"].append(f"[query] maneuver {idx + 1}/{len(maneuvers)}: {instr}")
@@ -424,6 +421,18 @@ def agent_decision_node(state: JourneyState, llm: ChatOllama) -> JourneyState:
     maneuvers = state["gold_maneuvers"]
     idx = state["maneuver_idx"]
     maneuver = maneuvers[idx] if idx < len(maneuvers) else {}
+
+    # Trivial segment: skip LLM call entirely (no meaningful choice)
+    if len(maneuvers) <= 1:
+        alts = state.get("current_alternatives", [])
+        if alts:
+            state["chosen_alternative"] = {
+                "segment_id": alts[0]["id"],
+                "reasoning": "(auto) single segment, no decision needed",
+                "delay": 0,
+            }
+            state["log"].append("[agent] single maneuver segment — auto-chose first alternative")
+        return state
 
     segments_str = _format_segments(state["current_alternatives"])
     disruptions_str = state.get("active_disruptions_text", "None")
@@ -490,7 +499,8 @@ Evaluate all options internally, then output choose_segment with your final choi
 Do NOT call evaluate_segment — go directly to choose_segment."""
 
     if isinstance(llm, ChatOllama):
-        tool_calls = _call_llm(llm, system, user, _tools)
+        tool_calls = _call_llm(llm, system, user, _tools,
+                                num_predict=state.get("llm_num_predict", 4096))
     else:
         llm_tools = llm.bind_tools(_tools)
         response = llm_tools.invoke([SystemMessage(content=system), HumanMessage(content=user)])
@@ -555,6 +565,18 @@ def move_node(state: JourneyState) -> JourneyState:
     if path_coords:
         chosen_disruptions = _check_disruptions_on_route(path_coords, state["disruptions"])
 
+    # Record edges of only the chosen route for traffic feedback
+    route_edges = []
+    if chosen:
+        for p in chosen.shape:
+            if getattr(p, 'edge_id', None) and p.edge_id > 0:
+                route_edges.append({
+                    "edge_id": p.edge_id,
+                    "speed": getattr(p, 'speed', 50) or 50,
+                    "length_m": 100,
+                })
+    state["route_edges"] = route_edges
+
     state["steps"].append({
         "index": state["step_count"],
         "from": [state["current_lat"], state["current_lon"]],
@@ -564,6 +586,7 @@ def move_node(state: JourneyState) -> JourneyState:
         "maneuver": state["maneuver_idx"],
         "path_coords": path_coords,
         "disruptions_on_route": chosen_disruptions,
+        "route_edges": route_edges,
         "time": datetime.now().isoformat(),
     })
     state["step_count"] += 1
@@ -604,7 +627,7 @@ def build_graph(valhalla: ValhallaEngine, llm: ChatOllama):
     graph.add_edge("disruption_check", "query_maneuver")
     graph.add_edge("query_maneuver", "agent_decision")
     graph.add_edge("agent_decision", "move")
-    graph.add_conditional_edges("move", check_maneuvers, {"query": "query_maneuver", "arrive": "arrive"})
+    graph.add_conditional_edges("move", check_maneuvers, {"query": "disruption_check", "arrive": "arrive"})
     graph.add_edge("arrive", END)
 
     return graph.compile()
@@ -614,7 +637,7 @@ def run(agent_id: str, profile_text: str,
         origin: Tuple[float, float], destination: Tuple[float, float],
         gold_waypoints: List[Tuple[float, float]], gold_length_km: float = 0, gold_duration_sec: float = 0,
         valhalla: Optional[ValhallaEngine] = None, llm: Optional[ChatOllama] = None,
-        recursion_limit: int = 50,
+        recursion_limit: int = 50, llm_num_predict: int = 4096,
         disruptions: Optional[List[Dict[str, Any]]] = None,
         congestion_zones: Optional[List[Dict[str, Any]]] = None,
         traffic_stream: Optional[str] = None,
@@ -673,6 +696,7 @@ def run(agent_id: str, profile_text: str,
         "personality_self_intro": personality_self_intro or profile_text,
         "personality_travel_plans": personality_travel_plans or "",
         "personality_context": personality_context or [],
+        "llm_num_predict": llm_num_predict,
     }
 
     app = build_graph(v, llm or ChatOllama(model="llama3.2", temperature=0.5))

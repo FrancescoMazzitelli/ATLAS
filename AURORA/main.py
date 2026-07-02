@@ -2,7 +2,8 @@ import logging
 import json
 import argparse
 import os
-from typing import Optional, Tuple
+import csv
+from typing import Optional, Tuple, List, Dict
 
 from agentic.core.models import SociodemographicProfile, Location
 from simulation.engine import SimulationEngine
@@ -16,8 +17,77 @@ CHICAGO_DEFAULT = (41.8781, -87.6298)
 CHICAGO_HOME_DEFAULT = (41.88, -87.63)
 
 
+def _load_csv_coords(csv_path: str) -> Dict[int, List[Dict]]:
+    """Load agents.csv and return {agent_idx: [{o_x, o_y, d_x, d_y, departure_sec}, ...]}."""
+    coords_by_agent: Dict[int, List[Dict]] = {}
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            aidx = int(row["agent_idx"])
+            entry = {
+                "o_x": float(row["o_x"]),
+                "o_y": float(row["o_y"]),
+                "d_x": float(row["d_x"]),
+                "d_y": float(row["d_y"]),
+                "departure_sec": int(row["departure_sec"]),
+            }
+            coords_by_agent.setdefault(aidx, []).append(entry)
+    return coords_by_agent
+
+
+def _resolve_location_coords(
+    entry: dict,
+    loc_idx: int,
+    loc_type: str,
+    csv_legs: List[Dict],
+    nominatim: Optional[NominatimClient] = None,
+) -> Tuple[float, float, str]:
+    """Resolve coordinates for a location in the itinerary.
+
+    CSV rows represent trip legs (L0->L1, L1->L2, ...).
+    For loc_idx=0 use CSV leg 0 origin; for loc_idx>0 use CSV leg (loc_idx-1) destination.
+    Priority:
+    1. JSONL embedded coordinates (itinerary.coordinates)
+    2. CSV coordinates (agents.csv) matched by position
+    3. Default Chicago coordinates
+    """
+    itinerary = entry.get("itinerary", {})
+    coords = itinerary.get("coordinates")
+    if coords and loc_idx < len(coords):
+        c = coords[loc_idx]
+        lat = float(c.get("lat", c.get("y", CHICAGO_DEFAULT[0])))
+        lon = float(c.get("lon", c.get("lng", c.get("x", CHICAGO_DEFAULT[1]))))
+        name = None
+        if nominatim:
+            name = nominatim.reverse_name(lat, lon)
+        return lat, lon, name or f"{loc_type.lower()}_{loc_idx}"
+
+    if csv_legs:
+        if loc_idx == 0:
+            lat, lon = csv_legs[0]["o_y"], csv_legs[0]["o_x"]
+            name = None
+            if nominatim:
+                name = nominatim.reverse_name(lat, lon)
+            return lat, lon, name or f"{loc_type.lower()}_{loc_idx}"
+        elif loc_idx <= len(csv_legs):
+            leg = csv_legs[loc_idx - 1]
+            lat, lon = leg["d_y"], leg["d_x"]
+            name = None
+            if nominatim:
+                name = nominatim.reverse_name(lat, lon)
+            return lat, lon, name or f"{loc_type.lower()}_{loc_idx}"
+
+    if loc_type == "HOME":
+        return (CHICAGO_HOME_DEFAULT[0], CHICAGO_HOME_DEFAULT[1], "Home")
+    elif loc_type in ("WORK", "SCHOOL"):
+        return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Workplace")
+
+    return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Misc")
+
+
 def _load_agents_from_jsonl(
     jsonl_path: str,
+    csv_path: Optional[str] = None,
     max_agents: Optional[int] = None,
     nominatim: Optional[NominatimClient] = None,
 ) -> list:
@@ -31,26 +101,9 @@ def _load_agents_from_jsonl(
     if max_agents:
         entries = entries[:max_agents]
 
-    def _entry_coords(entry: dict, loc_type: str, idx: int) -> Tuple[float, float, str]:
-        itinerary = entry.get("itinerary", {})
-        coords = itinerary.get("coordinates")
-        if coords and idx < len(coords):
-            c = coords[idx]
-            lat = float(c.get("lat", c.get("y", CHICAGO_DEFAULT[0])))
-            lon = float(c.get("lon", c.get("lng", c.get("x", CHICAGO_DEFAULT[1]))))
-            name = None
-            if nominatim:
-                name = nominatim.reverse_name(lat, lon)
-            return lat, lon, name or f"{loc_type.lower()}_{idx}"
-
-        locs = itinerary.get("locations", [])
-        if idx < len(locs):
-            _type = locs[idx]
-            if _type == "HOME":
-                return (CHICAGO_HOME_DEFAULT[0], CHICAGO_HOME_DEFAULT[1], "Home")
-            elif _type in ("WORK", "SCHOOL"):
-                return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Workplace")
-        return (CHICAGO_DEFAULT[0], CHICAGO_DEFAULT[1], "Misc")
+    csv_by_agent = {}
+    if csv_path and os.path.exists(csv_path):
+        csv_by_agent = _load_csv_coords(csv_path)
 
     agent_list = []
     for entry in entries:
@@ -58,17 +111,19 @@ def _load_agents_from_jsonl(
         bio = entry.get("self_introduction", "")
         locs = entry.get("itinerary", {}).get("locations", [])
         contexts = entry.get("itinerary", {}).get("location_context", [])
+        dept_times = entry.get("itinerary", {}).get("departure_times", [])
 
         if not locs:
             continue
 
-        resolved = []
+        csv_legs = csv_by_agent.get(entry["agent_idx"], [])
+
+        resolved: List[Tuple[str, float, float, str]] = []
         for i, lt in enumerate(locs):
-            lat, lon, name = _entry_coords(entry, lt, i)
+            lat, lon, name = _resolve_location_coords(entry, i, lt, csv_legs, nominatim)
             resolved.append((lt, lat, lon, name))
 
         home = Location(f"h_{aid}", resolved[0][3], resolved[0][1], resolved[0][2], "home")
-
         has_work = "WORK" in locs or "SCHOOL" in locs
         has_disc = "DISCRETIONARY" in locs
         occ = None
@@ -89,13 +144,21 @@ def _load_agents_from_jsonl(
             risk_tolerance=0.5,
         )
 
+        itinerary_locations: List[Tuple[str, Location, str]] = []
+        for i, lt in enumerate(resolved):
+            loc_type, lat, lon, name = lt
+            ctx = contexts[i] if i < len(contexts) else ""
+            loc = Location(f"loc_{aid}_{i}", name, lat, lon, loc_type.lower())
+            itinerary_locations.append((loc_type, loc, ctx))
+
         agent_list.append({
             "id": aid,
             "profile": profile,
             "home": home,
             "work": work,
             "bio": bio,
-            "itinerary": list(zip(locs, contexts, resolved)),
+            "itinerary_locations": itinerary_locations,
+            "departure_times": dept_times,
             "personality": {
                 "self_intro": entry.get("self_introduction", ""),
                 "travel_plans": entry.get("travel_plans_summary", ""),
@@ -105,60 +168,6 @@ def _load_agents_from_jsonl(
 
     logging.info(f"Loaded {len(agent_list)} agents from {jsonl_path}")
     return agent_list
-
-
-def _run_itinerary(engine, agent, output_dir: str, recorder=None):
-    """Run each leg of the agent's itinerary through the simulation."""
-    aid = agent["id"]
-    itinerary = agent["itinerary"]
-    pers = agent["personality"]
-
-    results = []
-    all_steps = []
-    tick_offset = 0
-
-    for leg in range(len(itinerary) - 1):
-        loc_from = itinerary[leg]
-        loc_to = itinerary[leg + 1]
-        origin = (loc_from[2][1], loc_from[2][2])
-        dest = (loc_to[2][1], loc_to[2][2])
-
-        result = engine.run_agent(
-            aid,
-            agent["profile"],
-            agent["home"],
-            agent["work"],
-            personality_self_intro=pers["self_intro"],
-            personality_travel_plans=pers["travel_plans"],
-            personality_context=pers["context"],
-        )
-        results.append(result)
-        all_steps.append(result.journey.get("steps", []))
-
-    # Populate recorder for traffic map even in sequential mode
-    if recorder:
-        from simulation.recorder import TickRecord
-        recorder.register_agent(aid, agent["profile"], agent["bio"], agent["home"], agent["work"])
-        for leg_idx, steps in enumerate(all_steps):
-            for step_i, step in enumerate(steps):
-                frm = step.get("from")
-                if frm and len(frm) >= 2 and frm[0] is not None:
-                    rec = TickRecord(tick=tick_offset + step_i, timestamp="")
-                    rec.agents[aid] = {
-                        "position": list(frm),
-                        "destination": list(itinerary[leg_idx + 1][2][1:3]) if leg_idx + 1 < len(itinerary) else None,
-                        "is_traveling": step_i < len(steps) - 1,
-                        "arrived": step_i == len(steps) - 1 and leg_idx == len(all_steps) - 1,
-                        "step_count": step["index"] + 1,
-                        "route_edge_count": 0,
-                    }
-                    recorder.ticks.append(rec)
-            tick_offset += len(steps)
-        final_journey = results[-1].journey if results else {}
-        recorder.finalize_agent(aid, final_journey.get("status", "arrived"),
-                                sum(len(s) for s in all_steps), journey=final_journey)
-
-    return results
 
 
 def _print_agent_reasoning(journey: dict):
@@ -173,12 +182,12 @@ def _print_agent_reasoning(journey: dict):
         print(f"    Step {s['index']}: maneuver {maneuver} | {seg}")
         if reasoning:
             print(f"      Reasoning: {reasoning}")
-        print(f"      ({frm[0]:.4f},{frm[1]:.4f}) → ({to[0]:.4f},{to[1]:.4f})")
+        print(f"      ({frm[0]:.4f},{frm[1]:.4f}) \u2192 ({to[0]:.4f},{to[1]:.4f})")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AURORA — Autonomous Urban Reasoning and Optimized Routing Adaptation"
+        description="AURORA \u2014 Autonomous Urban Reasoning and Optimized Routing Adaptation"
     )
     parser.add_argument("-c", "--config", default="config.yaml", help="config file path")
     parser.add_argument("--list-agents", action="store_true", help="list loaded agents and exit")
@@ -192,6 +201,8 @@ def main():
                         help="generate traffic congestion & agent path maps")
     parser.add_argument("--no-record", action="store_true",
                         help="disable tick-by-tick recording")
+    parser.add_argument("--csv-coords", default="data/agents.csv",
+                        help="CSV file with origin/destination coordinates per leg")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -212,6 +223,7 @@ def main():
 
     agent_list = _load_agents_from_jsonl(
         cfg.data.agents_file or "data/agents.jsonl",
+        csv_path=args.csv_coords,
         max_agents=max_n or cfg.data.num_agents,
         nominatim=nominatim,
     )
@@ -219,9 +231,9 @@ def main():
     if args.list_agents:
         print(f"Loaded {len(agent_list)} agents:\n")
         for a in agent_list:
-            locs = [x[0] for x in a["itinerary"]]
+            locs = [x[0] for x in a["itinerary_locations"]]
             print(f"  {a['id']}: {a['bio'][:60]}...")
-            print(f"       Itinerary: {' → '.join(locs)}")
+            print(f"       Itinerary: {' \u2192 '.join(locs)}")
             print()
         return
 
@@ -237,10 +249,19 @@ def main():
         valhalla_timeout=cfg.valhalla.timeout,
         llm_model=cfg.llm.model,
         llm_temperature=cfg.llm.temperature,
+        llm_num_predict=cfg.llm.num_predict,
         log_level=cfg.simulation.log_level,
         recursion_limit=cfg.simulation.recursion_limit,
         disruption_files=list(cfg.simulation.disruption_files),
         recorder=recorder,
+        seed=cfg.simulation.seed,
+        discretionary_enabled=cfg.discretionary.enabled,
+        discretionary_social_invitation=cfg.discretionary.social_invitation,
+        docker_container=cfg.traffic.docker_container,
+        valhalla_config=cfg.traffic.valhalla_config,
+        container_traffic_dir=cfg.traffic.container_traffic_dir,
+        traffic_backup_dir=cfg.traffic.traffic_backup_dir,
+        jam_density_per_km=cfg.traffic.jam_density_per_km,
     )
 
     if args.tick_mode:
@@ -248,13 +269,22 @@ def main():
             start_datetime=__import__("datetime").datetime.fromisoformat(
                 cfg.simulation.clock.start_datetime
             ),
-            tick_duration_minutes=cfg.simulation.clock.tick_duration_minutes,
+            tick_duration_seconds=cfg.simulation.clock.tick_duration_seconds,
             max_ticks=cfg.simulation.clock.max_ticks,
         )
         agent_tuples = [(a["id"], a["profile"], a["home"], a["work"]) for a in agent_list]
         bios = [a["bio"] for a in agent_list]
         personalities = [a["personality"] for a in agent_list]
-        results = engine.run(agent_tuples, clock, bios=bios, personalities=personalities)
+        itineraries = [a.get("itinerary_locations", []) for a in agent_list]
+        departure_times = [a.get("departure_times", []) for a in agent_list]
+
+        results = engine.run(
+            agent_tuples, clock,
+            bios=bios,
+            personalities=personalities,
+            itineraries=itineraries,
+            departure_times_list=departure_times,
+        )
         print(f"\n{'='*60}\nSUMMARY\n{'='*60}")
         print(json.dumps(engine.summary(), indent=2))
         if args.map:
@@ -265,13 +295,28 @@ def main():
                     _print_agent_reasoning(j)
     else:
         for a in agent_list:
+            loc_types = [x[0] for x in a["itinerary_locations"]]
             print(
-                f"\n{'#'*60}\n# {a['id']}: {' → '.join(x[0] for x in a['itinerary'])}\n{'#'*60}"
+                f"\n{'#'*60}\n# {a['id']}: {' \u2192 '.join(loc_types)}\n{'#'*60}"
             )
-            _run_itinerary(engine, a, args.output_dir, recorder=recorder)
-            res = engine.results.get(a["id"])
-            if res:
-                _print_agent_reasoning(res.journey)
+            for leg in range(len(a["itinerary_locations"]) - 1):
+                loc_from = a["itinerary_locations"][leg]
+                loc_to = a["itinerary_locations"][leg + 1]
+                origin = (loc_from[1].lat, loc_from[1].lng)
+                dest = (loc_to[1].lat, loc_to[1].lng)
+
+                result = engine.run_agent(
+                    a["id"],
+                    a["profile"],
+                    a["home"],
+                    a["work"],
+                    personality_self_intro=a["personality"]["self_intro"],
+                    personality_travel_plans=a["personality"]["travel_plans"],
+                    personality_context=a["personality"]["context"],
+                )
+                res = engine.results.get(a["id"])
+                if res:
+                    _print_agent_reasoning(res.journey)
 
         print(f"\n{'='*60}\nSUMMARY\n{'='*60}")
         print(json.dumps(engine.summary(), indent=2))

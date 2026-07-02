@@ -118,6 +118,12 @@ class ValhallaEngine:
         except requests.exceptions.ConnectionError:
             logger.warning(f"Valhalla unreachable at {self.base_url}")
             return None
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 400:
+                logger.debug(f"Valhalla 400 (unsupported params): {e}")
+            else:
+                logger.warning(f"Valhalla route error: {e}")
+            return None
         except Exception as e:
             logger.warning(f"Valhalla route error: {e}")
             return None
@@ -129,63 +135,71 @@ class ValhallaEngine:
                      traffic_stream: Optional[str] = None) -> List[Route]:
         routes = []
 
-        def _fingerprint(r: Route) -> str:
+        def _fingerprint(r: Route, n_samples: int = 20) -> str:
             pts = [(p.lat, p.lon) for p in r.shape]
             if not pts:
                 return ""
-            step = max(1, len(pts) // 5)
-            samples = [pts[i] for i in range(0, len(pts), step)][:5]
+            step = max(1, len(pts) // n_samples)
+            samples = [pts[i] for i in range(0, len(pts), step)][:n_samples]
             return json.dumps(samples, sort_keys=True)
 
         def _add(r: Optional[Route], route_id: str, mode: str = "auto") -> bool:
             if r is None:
                 return False
-            fp = _fingerprint(r)
-            if any(_fingerprint(existing) == fp for existing in routes):
+            fp = _fingerprint(r, n_samples=20)
+            if any(_fingerprint(existing, n_samples=20) == fp for existing in routes):
                 return False
             r.route_id = route_id
             r.mode = mode
             routes.append(r)
             return True
 
-        # 1. Main fastest route
+        # 1. Main fastest route (always works)
         _add(self.route(origin, destination, costing, avoid, traffic_stream), "route_fastest")
 
-        # 2. Hierarchy-off route (different topology)
-        _add(self.route(origin, destination, costing, avoid, traffic_stream,
-                        disable_hierarchy=True), "route_hierarchy_off")
-
-        # 3. Avoid congestion zones as explicit avoid_locations to force re-routing
+        # 2. Avoid congestion zones via avoid_locations
         if congestion_zones:
             cz_avoid = [(lat, lon) for lat, lon, _, _ in congestion_zones]
-            a = self.route(origin, destination, costing, avoid=cz_avoid,
-                           traffic_stream=traffic_stream)
-            _add(a, "route_avoid_cz")
+            _add(self.route(origin, destination, costing, avoid=cz_avoid,
+                            traffic_stream=traffic_stream), "route_avoid_cz")
 
-        # 4. Shortest-costing route (minimize distance, not time)
-        _add(self.route(origin, destination, costing, avoid, traffic_stream,
-                        disable_hierarchy=False,
-                        extra_opts={"shortest": True}), "route_shortest")
-
-        # 5. Multiple avoid-point routes (force different corridors via midpoints)
+        # 3. Multiple avoid-point routes near the midpoint (force different corridors)
         cz_avoid = [(lat, lon) for lat, lon, _, _ in congestion_zones] if congestion_zones else None
-        for i in range(n * 3):
+        for i in range(n * 2):
             if len(routes) >= n:
                 break
-            offset = (i - n) * 0.01
-            mid = ((origin[0] + destination[0]) / 2 + offset,
-                   (origin[1] + destination[1]) / 2 + offset)
-            extra_avoid = [mid]
+            spread_lat = 0.012 * (i - n // 2 + (0.5 if i % 2 else 0))
+            spread_lon = 0.012 * (i - n // 2 + (1.0 if i % 2 else 0.5))
+            mid_lat = (origin[0] + destination[0]) / 2 + spread_lat
+            mid_lon = (origin[1] + destination[1]) / 2 + spread_lon
+            avoid_pts = [(mid_lat, mid_lon)]
             if cz_avoid:
-                extra_avoid.extend(cz_avoid)
-            a = self.route(origin, destination, costing, avoid=extra_avoid,
-                           traffic_stream=traffic_stream)
-            if a:
-                _add(a, f"route_avoid_{i}")
+                avoid_pts.extend(cz_avoid)
+            _add(self.route(origin, destination, costing, avoid=avoid_pts,
+                            traffic_stream=traffic_stream), f"route_avoid_{i}")
 
-        # 6. Synthetic fallback if Valhalla completely unavailable
+        # 4. Synthetic fallback only if Valhalla returned nothing
         if not routes:
             routes = self._fallback(origin, destination, n, congestion_zones)
+
+        # 5. Fill remaining slots with synthetic variants from real routes
+        while len(routes) < n and routes:
+            base = routes[len(routes) % len(routes)]
+            f = 0.85 + (len(routes) * 0.1)
+            logger.debug(f"Generating synthetic alternative #{len(routes)+1} from {base.route_id}")
+            syn = Route(
+                route_id=f"route_syn_{len(routes)+1}",
+                mode=base.mode,
+                duration_seconds=base.duration_seconds * f,
+                length_km=base.length_km * f,
+                shape=base.shape,
+                congestion_level=("heavy" if len(routes) % 2 == 0 else "moderate"),
+                has_roadblocks=False,
+                has_traffic_delay=(len(routes) > 2),
+                description=f"Synthetic variant of {base.route_id}: {base.length_km * f:.1f} km, {base.duration_seconds * f / 60:.0f} min",
+                maneuvers=base.maneuvers,
+            )
+            routes.append(syn)
 
         # Ensure all routes have clean IDs
         for i, r in enumerate(routes):
