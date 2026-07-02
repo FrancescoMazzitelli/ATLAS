@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import re
 import locale
+import yaml
 
 """
 Preprocessing steps for census and travel survey data.
@@ -19,7 +20,7 @@ that needs to be done manually.
 locale.setlocale(locale.LC_ALL, "en_US.UTF-8") # this will be a problem in the future
 
 
-def process_MyDailyTravelData(config_folder: str):
+def process_MyDailyTravelData(config_folder: str, mydailytravel_source_path: str | None = None):
     def value_to_int(x):
         try:
             return int(x)
@@ -67,9 +68,14 @@ def process_MyDailyTravelData(config_folder: str):
     }
 
     # get variables and table from data dictionary
-    data_path = Path(config_folder) / "data"
-    file_path = data_path / "data_dictionary.xlsx"
-    data_dictionary = pd.read_excel(file_path, sheet_name=None)
+    config_path = Path(config_folder)
+    if mydailytravel_source_path is None:
+        mdt_path = config_path / "mydailytravel" / "source"
+    else:
+        mdt_path = Path(mydailytravel_source_path)
+
+    data_dictionary = pd.read_excel(mdt_path / "data_dictionary.xlsx", sheet_name=None)
+
     variables_df = data_dictionary["Variables"]
     variables_df = variables_df[variables_df["QUESTION TEXT"].notna()]
 
@@ -79,8 +85,7 @@ def process_MyDailyTravelData(config_folder: str):
         )
 
     # get response dictionary from person.csv
-    file_path = data_path / "person.csv"
-    person_cols = pd.read_csv(file_path, nrows=0).columns.to_list()
+    person_cols = pd.read_csv(mdt_path / "person.csv", nrows=0).columns.to_list()
 
     # query dictionary
     query_dictionary = {}
@@ -330,11 +335,20 @@ def process_insee_census(config_folder):
     return mapper
 
 
-def generate_questions(config_folder: str, source: str = "US"):
+def generate_questions(config_yaml: str | Path, source: str = "US"):
+    config_yaml = Path(config_yaml)
+    config_dir = config_yaml.parent
+
+    with open(config_yaml, 'r') as f:
+        config = yaml.safe_load(f)
+
     if source == "US":
-        return process_MyDailyTravelData(config_folder=config_folder)
+        mydailytravel_path = config.get("data", {}).get("mydailytravel_source_path")
+        if mydailytravel_path:
+            mydailytravel_path = config_dir / mydailytravel_path
+        return process_MyDailyTravelData(config_folder=str(config_dir), mydailytravel_source_path=str(mydailytravel_path) if mydailytravel_path else None)
     elif source == "FR":
-        return process_EnqueteMenagesDeplacements(config_folder=config_folder)
+        return process_EnqueteMenagesDeplacements(config_folder=str(config_dir))
 
 
 def _decapitalize(sentence: str)->str:

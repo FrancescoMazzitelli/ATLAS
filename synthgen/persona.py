@@ -16,17 +16,21 @@ def get_demographic_data(data_path: str|os.PathLike, person: bool = True) -> Tup
     Househould and person data: https://www2.census.gov/programs-surveys/acs/data/pums/2019/1-Year/
     """
     data_path = Path(data_path)
-    dd_path = data_path.glob("PUMS_Data_Dictionary*.csv")
-    dd = pd.read_csv(*dd_path, header=None, names=list("abcdefg"))
+    dd_path = list(data_path.glob("PUMS_Data_Dictionary*.csv"))
+    if not dd_path:
+        raise FileNotFoundError(f"No PUMS_Data_Dictionary*.csv found in {data_path}. Please check your pums_data_path in config.yaml")
+    dd = pd.read_csv(dd_path[0], header=None, names=list("abcdefg"))
     variable_desc = dd[dd.a == "NAME"].set_index("b")["e"].to_dict()
 
     na_str = "MISSING"
 
     if person:
-        df_path = data_path.glob("psam_p*.csv")
+        df_path = list(data_path.glob("psam_p*.csv"))
     else:
-        df_path = data_path.glob("psam_h*.csv")
-    df = pd.read_csv(*df_path, dtype="str")
+        df_path = list(data_path.glob("psam_h*.csv"))
+    if not df_path:
+        raise FileNotFoundError(f"No psam_p*.csv or psam_h*.csv found in {data_path}. Please check your pums_data_path in config.yaml")
+    df = pd.read_csv(df_path[0], dtype="str")
     pums_variables = df.columns.values
     pums_variable_dict = {k:v for k,v in variable_desc.items() if k in pums_variables}
     mapper = {}
@@ -45,20 +49,6 @@ def get_demographic_data(data_path: str|os.PathLike, person: bool = True) -> Tup
         }
 
     return df, mapper
-
-
-def write_demographic_summary(df: pd.DataFrame, mapper: Dict[str,str]) -> str:
-    attrs = []
-    for _, row in df.iterrows():
-        descriptions = []
-        for var, val in zip(df.columns, row):
-            var_package = mapper[var]
-            encoded_var = var_package["answers"].get(str(val))
-            assert isinstance(var_package, dict)
-            if encoded_var and encoded_var != "No":
-                desc = var_package.get("description")
-                descriptions.append(f"{desc}: {encoded_var}")
-        agent_attrs
 
 
 def get_attr_description(col_names:List[str], row:Series, mapper: Dict[str, str]):

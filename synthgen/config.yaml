@@ -1,0 +1,20 @@
+model:
+  chat_model: "gpt-4"
+  chat_context_length: 8000
+  temperature: 0.5
+  max_tokens: 2048
+  api_type: "openai"
+
+synth:
+  source: "US"
+  sim_year: 2019
+  system_message_header: ""
+  system_message_footer: ""
+
+data:
+  base_path: "./data"
+  mydailytravel_source_path: "./mydailytravel/source"
+
+survey:
+  min_age: 18
+  max_age: 65
