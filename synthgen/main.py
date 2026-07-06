@@ -152,12 +152,12 @@ def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Pa
 
         for desc in descriptions_list[chunk_start:chunk_end]:
             agent_id = desc["agent_id"]
-            agents[agent_id] = {"agent_id": agent_id, "description": desc["description"]}
+            agents[agent_id] = {"agent_idx": agent_id, "description": desc["description"]}
 
         for narr in narratives_list:
             agent_id = narr["agent_id"]
             if agent_id in agents:
-                agents[agent_id]["narrative"] = narr["narrative"]
+                agents[agent_id]["travel_plans_summary"] = narr["narrative"]
                 agents[agent_id]["mood"] = narr["mood"]
                 if "debug_prompt" in narr:
                     agents[agent_id]["debug_narrative_prompt"] = narr["debug_prompt"]
@@ -165,16 +165,18 @@ def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Pa
         for intro in intros_list:
             agent_id = intro["agent_id"]
             if agent_id in agents:
-                agents[agent_id]["intro"] = intro["intro"]
+                agents[agent_id]["self_introduction"] = intro["intro"]
                 if "debug_prompt" in intro:
                     agents[agent_id]["debug_intro_prompt"] = intro["debug_prompt"]
 
         for diary in diaries_list:
             agent_id = diary["agent_id"]
             if agent_id in agents:
-                agents[agent_id]["locations"] = diary["locations"]
-                agents[agent_id]["contexts"] = diary["contexts"]
-                agents[agent_id]["departures"] = diary["departures"]
+                agents[agent_id]["itinerary"] = {
+                    "locations": diary["locations"],
+                    "location_context": diary["contexts"],
+                    "departure_times": diary["departures"],
+                }
                 if "debug_prompt" in diary:
                     agents[agent_id]["debug_diary_prompt"] = diary["debug_prompt"]
 
@@ -198,7 +200,8 @@ def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Pa
         checkpoint_path = output_json.parent / f"{output_json.stem}.cache_{checkpoint_num}"
         agents_list = [agents[aid] for aid in sorted(agents.keys())]
         with open(checkpoint_path, 'w') as f:
-            json.dump(agents_list, f, indent=2)
+            for agent in agents_list:
+                f.write(json.dumps(agent) + "\n")
         checkpoint_files.append(checkpoint_path)
 
     if verbose:
@@ -211,10 +214,11 @@ def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Pa
     final_agents = []
     for checkpoint_path in checkpoint_files:
         with open(checkpoint_path, 'r') as f:
-            final_agents.extend(json.load(f))
+            final_agents.extend(json.loads(line) for line in f if line.strip())
 
     with open(output_json, 'w') as f:
-        json.dump(final_agents, f, indent=2)
+        for agent in final_agents:
+            f.write(json.dumps(agent) + "\n")
 
     if verbose:
         print(f"Wrote final agents file: {output_json}")
@@ -229,7 +233,7 @@ def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Pa
 
 
 def combine_agents(descriptions_json: Path, narratives_json: Path, intros_json: Path, diaries_json: Path, output_json: Path, config_yaml: str | Path | None = None, verbose: bool = False):
-    """Combine descriptions, narratives, intros, and diaries into a single agents.json file."""
+    """Combine descriptions, narratives, intros, and diaries into a single agents.jsonl file."""
     agents = {}
     demographic_inclusion = "narrative"
 
@@ -244,14 +248,14 @@ def combine_agents(descriptions_json: Path, narratives_json: Path, intros_json: 
             for obj in json.load(f):
                 agent_id = obj["agent_id"]
                 descriptions_by_id[agent_id] = obj["description"]
-                agents[agent_id] = {"agent_id": agent_id, "description": obj["description"]}
+                agents[agent_id] = {"agent_idx": agent_id, "description": obj["description"]}
 
     if narratives_json.exists():
         with open(narratives_json, 'r') as f:
             for obj in json.load(f):
                 agent_id = obj["agent_id"]
                 if agent_id in agents:
-                    agents[agent_id]["narrative"] = obj["narrative"]
+                    agents[agent_id]["travel_plans_summary"] = obj["narrative"]
                     agents[agent_id]["mood"] = obj["mood"]
                     if "debug_prompt" in obj:
                         agents[agent_id]["debug_narrative_prompt"] = obj["debug_prompt"]
@@ -261,7 +265,7 @@ def combine_agents(descriptions_json: Path, narratives_json: Path, intros_json: 
             for obj in json.load(f):
                 agent_id = obj["agent_id"]
                 if agent_id in agents:
-                    agents[agent_id]["intro"] = obj["intro"]
+                    agents[agent_id]["self_introduction"] = obj["intro"]
                     if "debug_prompt" in obj:
                         agents[agent_id]["debug_intro_prompt"] = obj["debug_prompt"]
 
@@ -270,9 +274,11 @@ def combine_agents(descriptions_json: Path, narratives_json: Path, intros_json: 
             for obj in json.load(f):
                 agent_id = obj["agent_id"]
                 if agent_id in agents:
-                    agents[agent_id]["locations"] = obj["locations"]
-                    agents[agent_id]["contexts"] = obj["contexts"]
-                    agents[agent_id]["departures"] = obj["departures"]
+                    agents[agent_id]["itinerary"] = {
+                        "locations": obj["locations"],
+                        "location_context": obj["contexts"],
+                        "departure_times": obj["departures"],
+                    }
                     if "debug_prompt" in obj:
                         agents[agent_id]["debug_diary_prompt"] = obj["debug_prompt"]
 
@@ -286,7 +292,8 @@ def combine_agents(descriptions_json: Path, narratives_json: Path, intros_json: 
 
     agents_list = [agents[agent_id] for agent_id in sorted(agents.keys())]
     with open(output_json, 'w') as f:
-        json.dump(agents_list, f, indent=2)
+        for agent in agents_list:
+            f.write(json.dumps(agent) + "\n")
 
     if verbose:
         print(f"Combined {len(agents)} agents into {output_json}")
@@ -345,7 +352,7 @@ def main():
     narratives_json = run_desc_dir / "narratives.json"
     intros_json = run_desc_dir / "intros.json"
     diaries_json = run_desc_dir / "diaries.json"
-    combined_json = run_desc_dir / "agents.json"
+    combined_json = run_desc_dir / "agents.jsonl"
     prompts_yaml = Path(__file__).parent / "prompts.yaml"
 
     if args.verbose:
