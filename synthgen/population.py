@@ -12,7 +12,7 @@ from geopandas import GeoDataFrame
 from shapely import Point
 import requests
 
-locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+# locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
 
 
 def process_MyDailyTravelData(config_folder: str, mydailytravel_source_path: str | None = None):
@@ -135,10 +135,10 @@ def synthesize_population(config_yaml: str | Path, n_sample: int, source: str = 
 
     if source == "US":
         if read_from_dataset:
-            popsim_df = pd.read_csv(config_dir / "data/populationsim/output/synthetic_persons.csv")
-            pums_df = pd.read_csv(config_dir / "data/populationsim/data/pums_person_chicago.csv", dtype=str)
-            puma_gdf = gpd.read_file(config_dir / "data/tl_2019_17_puma10.shp")
-            cmap_gdf = gpd.read_file(config_dir / "data/Facility_Planning_Areas_2016.shp")
+            popsim_df = pd.read_csv(config_dir / "synth_data/populationsim/output/synthetic_persons.csv")
+            pums_df = pd.read_csv(config_dir / "synth_data/populationsim/data/pums_person_chicago.csv", dtype=str)
+            puma_gdf = gpd.read_file(config_dir / "synth_data/tl_2019_17_puma10.shp")
+            cmap_gdf = gpd.read_file(config_dir / "synth_data/Facility_Planning_Areas_2016.shp")
 
             cmap_gdf.to_crs(puma_gdf.crs, inplace=True)
             cmap_boundary = cmap_gdf.geometry.union_all()

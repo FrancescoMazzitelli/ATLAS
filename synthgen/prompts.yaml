@@ -46,7 +46,7 @@ diary: |
   Introduction: {intro}
 
   Generate exactly this JSON format (no other text):
-  {{"locations": ["HOME", "WORK", "HOME"], "contexts": ["morning routine", "8-hour shift", "evening at home"], "departures": ["08:00", "17:30"]}}
+  {{"locations": ["LOCATION1", "LOCATION2", "LOCATION3"], "contexts": ["CONTEXT1", "CONTEXT2", "CONTEXT3"], "departures": ["XX:XX", "XX:XX"]}}
 
   Rules:
   1. locations: array of [HOME, WORK, SCHOOL, or DISCRETIONARY] - must start with HOME
