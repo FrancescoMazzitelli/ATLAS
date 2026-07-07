@@ -370,6 +370,14 @@ def main():
         if any([descriptions_json.exists(), population_csv.exists(), narratives_json.exists(), intros_json.exists(), diaries_json.exists()]):
             print()
 
+    # Incidents are independent of the population/narrative/diary pipeline and
+    # only depend on the crash CSV, so run them regardless of run-folder state.
+    if args.create_incidents:
+        create_incidents(args.config_yaml, run_desc_dir, verbose=args.verbose)
+        # If incidents were the only thing requested, we're done.
+        if not (args.generate_population or args.generate_narratives or args.generate_diaries):
+            return
+
     if not args.generate_population and not args.create_incidents and not args.generate_narratives and not args.generate_diaries:
         args.generate_population = not descriptions_json.exists() or not population_csv.exists()
         args.generate_narratives = not narratives_json.exists()
@@ -404,9 +412,6 @@ def main():
         print(f"Population sample shape: {population.shape}")
         print(f"Saved to {descriptions_json}")
         print(f"Saved to {population_csv}")
-
-        if args.create_incidents:
-            create_incidents(args.config_yaml, run_desc_dir, verbose=args.verbose, population=population)
 
     if args.generate_narratives or not narratives_json.exists():
         if not descriptions_json.exists():
