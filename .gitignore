@@ -1,6 +1,8 @@
 # project specific
 mydailytravel/
 synth_data/
+validation/
+inrix*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

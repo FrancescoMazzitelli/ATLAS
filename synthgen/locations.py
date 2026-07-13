@@ -184,10 +184,8 @@ class LocationGenerator:
 
 
 if __name__ == "__main__":
-    run_dir = Path("/home/isalvador/git/ATLAS/synthgen/run/instr_small")
+    run_dir = Path("/home/isalvador/git/ATLAS/synthgen/run/instr_large")
     lg = LocationGenerator("config.yaml")
     lg.build_locations(run_dir, rebuild=False)
     lg.assign_locations(run_dir, random_seed=1)
     lg.trips.to_csv(run_dir / "trips.csv", index=None)
-
-    

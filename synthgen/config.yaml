@@ -7,7 +7,7 @@ ollama:
   max_retries: 2  # retries on timeout or error
 
 agents:
-  n_sample: 200
+  n_sample: 1000
   demographic_inclusion: "narrative"  # "narrative" | "footer" | "both"
   demographic_inclusion_percent: 0.8  # if "narrative" or "both": percentage of demographics to weave into narrative text
   demographic_inclusion_in_intros_diaries: "narrative"  # "none" | "narrative" | "footer" | "both" - whether to include demographic context when generating intros and diaries
