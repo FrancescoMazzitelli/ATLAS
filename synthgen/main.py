@@ -2,6 +2,7 @@ import pandas as pd
 import yaml
 import json
 import sys
+import time
 import argparse
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,6 +101,163 @@ def generate_agent_descriptions(
         print(sample.head(5).reset_index(drop=True).to_string())
 
     return descriptions, population
+
+
+def _format_duration(seconds: float) -> str:
+    """Human-readable duration, e.g. '1h 03m 20s'."""
+    seconds = int(round(seconds))
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+def run_pipeline_with_checkpoints(
+    config_yaml: str | Path,
+    prompts_yaml: Path,
+    descriptions_json: Path,
+    population_csv: Path,
+    narratives_json: Path,
+    intros_json: Path,
+    diaries_json: Path,
+    output_json: Path,
+    verbose: bool = False,
+    debug: bool = False,
+):
+    """Run the full LLM pipeline (narratives -> intros -> diaries -> combine) in
+    resumable batches of ``checkpoint_frequency`` agents.
+
+    Each batch runs the *entire* pipeline for its slice of agents and is cached to
+    a ``_checkpoints/`` subfolder. After every batch, ``agents.jsonl`` is rebuilt
+    from all completed batch caches, so it grows incrementally and a crash/rerun
+    resumes at the first unfinished batch. After the first freshly-run batch an
+    estimated total runtime is printed.
+    """
+    with open(config_yaml, 'r') as f:
+        config = yaml.safe_load(f)
+
+    checkpoint_frequency = config.get("agents", {}).get("checkpoint_frequency", 20)
+
+    with open(descriptions_json, 'r') as f:
+        descriptions = json.load(f)
+    total_agents = len(descriptions)
+
+    if total_agents == 0:
+        print("No descriptions to process.")
+        return
+
+    # checkpoint_frequency <= 0 disables batching: one batch covering everyone.
+    freq = checkpoint_frequency if checkpoint_frequency > 0 else total_agents
+    total_batches = (total_agents + freq - 1) // freq
+
+    checkpoint_dir = output_json.parent / "_checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    stem = output_json.stem
+    batch_cache_paths = []  # (batch_idx, desc, narr, intro, diary, agents) per batch
+
+    def _paths(b: int):
+        return {
+            "desc": checkpoint_dir / f"{stem}.descriptions.batch_{b}.json",
+            "narr": checkpoint_dir / f"{stem}.narratives.batch_{b}.json",
+            "intro": checkpoint_dir / f"{stem}.intros.batch_{b}.json",
+            "diary": checkpoint_dir / f"{stem}.diaries.batch_{b}.json",
+            "agents": checkpoint_dir / f"{stem}.agents.batch_{b}.jsonl",
+        }
+
+    print(
+        f"Running pipeline in {total_batches} batch(es) of up to {freq} agent(s) "
+        f"({total_agents} agents total)"
+    )
+
+    executed_batches = 0
+    per_batch_time = None
+
+    for b in range(total_batches):
+        chunk_start = b * freq
+        chunk_end = min(chunk_start + freq, total_agents)
+        p = _paths(b)
+        batch_cache_paths.append((b, p))
+
+        # Resume: an existing agents cache means this batch already finished.
+        if p["agents"].exists():
+            if verbose:
+                print(f"  Batch {b + 1}/{total_batches}: cached, skipping "
+                      f"(agents {chunk_start}-{chunk_end - 1})")
+            continue
+
+        print(f"\n=== Batch {b + 1}/{total_batches}: agents "
+              f"{chunk_start}-{chunk_end - 1} ===")
+        t0 = time.time()
+
+        # Slice descriptions for this batch and drive the existing stage
+        # functions over the subset (they read/write whole files).
+        with open(p["desc"], 'w') as f:
+            json.dump(descriptions[chunk_start:chunk_end], f, indent=2)
+
+        generate_narratives(config_yaml, p["desc"], p["narr"], prompts_yaml=prompts_yaml, verbose=verbose, debug=debug)
+        generate_intros(config_yaml, prompts_yaml, p["desc"], p["narr"], p["intro"], verbose=verbose, debug=debug)
+        generate_diaries(config_yaml, p["narr"], p["intro"], population_csv, p["diary"], prompts_yaml=prompts_yaml, descriptions_jsonl=p["desc"], verbose=verbose, debug=debug)
+        combine_agents(p["desc"], p["narr"], p["intro"], p["diary"], p["agents"], config_yaml=config_yaml, verbose=verbose)
+
+        # Rebuild agents.jsonl from every completed batch so it grows
+        # incrementally and is always consistent with the caches on disk.
+        _rebuild_from_caches(batch_cache_paths, output_json)
+
+        batch_time = time.time() - t0
+        executed_batches += 1
+        per_batch_time = batch_time  # most recent freshly-run batch
+
+        if executed_batches == 1:
+            remaining_batches = sum(1 for _, pp in batch_cache_paths if not pp["agents"].exists()) \
+                + (total_batches - (b + 1))
+            eta = per_batch_time * remaining_batches
+            print(f"\n  First batch took {_format_duration(batch_time)} "
+                  f"({batch_time / (chunk_end - chunk_start):.1f}s/agent).")
+            print(f"  Estimated time for the remaining {remaining_batches} batch(es): "
+                  f"~{_format_duration(eta)} (full run ~{_format_duration(eta + batch_time)}).\n")
+        elif verbose:
+            print(f"  Batch {b + 1} took {_format_duration(batch_time)}.")
+
+    # Merge per-batch caches into the aggregate stage files so existing
+    # tooling that reads narratives.json / intros.json / diaries.json still works.
+    _merge_aggregate(batch_cache_paths, "narr", narratives_json, key_sort=True)
+    _merge_aggregate(batch_cache_paths, "intro", intros_json, key_sort=True)
+    _merge_aggregate(batch_cache_paths, "diary", diaries_json, key_sort=True)
+    _rebuild_from_caches(batch_cache_paths, output_json)
+
+    n_done = sum(1 for line in open(output_json) if line.strip()) if output_json.exists() else 0
+    print(f"\nPipeline complete: {n_done}/{total_agents} agents in {output_json}")
+    if executed_batches:
+        print(f"Ran {executed_batches} batch(es) this session.")
+
+
+def _rebuild_from_caches(batch_cache_paths, output_json: Path):
+    """Concatenate all completed per-batch agents caches into output_json."""
+    lines = []
+    for _, p in batch_cache_paths:
+        if p["agents"].exists():
+            with open(p["agents"], 'r') as f:
+                lines.extend(l for l in f if l.strip())
+    with open(output_json, 'w') as f:
+        f.writelines(lines if all(l.endswith("\n") for l in lines) else (l if l.endswith("\n") else l + "\n" for l in lines))
+
+
+def _merge_aggregate(batch_cache_paths, key: str, aggregate_json: Path, key_sort: bool = True):
+    """Merge a per-stage batch cache (JSON list) into a single aggregate JSON list."""
+    merged = []
+    for _, p in batch_cache_paths:
+        path = p[key]
+        if path.exists():
+            with open(path, 'r') as f:
+                merged.extend(json.load(f))
+    if key_sort:
+        merged.sort(key=lambda o: o.get("agent_id", 0))
+    with open(aggregate_json, 'w') as f:
+        json.dump(merged, f, indent=2)
 
 
 def combine_agents_with_checkpoints(descriptions_json: Path, narratives_json: Path, intros_json: Path, diaries_json: Path, output_json: Path, config_yaml: str | Path | None = None, verbose: bool = False):
@@ -413,10 +571,37 @@ def main():
         print(f"Saved to {descriptions_json}")
         print(f"Saved to {population_csv}")
 
+    if not descriptions_json.exists():
+        print("Error: population_descriptions.json not found. Run --generate-population first.")
+        return
+    if not population_csv.exists():
+        print("Error: population.csv not found. Run --generate-population first.")
+        return
+
+    checkpoint_frequency = config.get("agents", {}).get("checkpoint_frequency", 20)
+
+    if checkpoint_frequency > 0:
+        # Batched, resumable pipeline: run narratives -> intros -> diaries ->
+        # combine for one slice of agents at a time, caching each batch and
+        # growing agents.jsonl incrementally. Completed batches are skipped on
+        # rerun. An estimated total runtime prints after the first batch.
+        run_pipeline_with_checkpoints(
+            config_yaml=args.config_yaml,
+            prompts_yaml=prompts_yaml,
+            descriptions_json=descriptions_json,
+            population_csv=population_csv,
+            narratives_json=narratives_json,
+            intros_json=intros_json,
+            diaries_json=diaries_json,
+            output_json=combined_json,
+            verbose=args.verbose,
+            debug=args.debug,
+        )
+        return
+
+    # checkpoint_frequency == 0: original non-batched behavior (each stage runs
+    # across all agents, then a single combine pass).
     if args.generate_narratives or not narratives_json.exists():
-        if not descriptions_json.exists():
-            print("Error: population_descriptions.json not found. Run --generate-population first.")
-            return
         if args.verbose and narratives_json.exists():
             print("Skipping narrative generation (files exist)")
             print()
@@ -424,9 +609,6 @@ def main():
             generate_narratives(args.config_yaml, descriptions_json, narratives_json, prompts_yaml=prompts_yaml, verbose=args.verbose, debug=args.debug)
 
     if args.generate_diaries or not intros_json.exists():
-        if not descriptions_json.exists():
-            print("Error: population_descriptions.json not found. Run --generate-population first.")
-            return
         if not narratives_json.exists():
             print("Error: narratives.json not found. Run --generate-narratives first.")
             return
@@ -442,9 +624,6 @@ def main():
             return
         if not intros_json.exists():
             print("Error: intros.json not found. Run intro generation first.")
-            return
-        if not population_csv.exists():
-            print("Error: population.csv not found. Run --generate-population first.")
             return
         if args.verbose and diaries_json.exists():
             print("Skipping diary generation (files exist)")

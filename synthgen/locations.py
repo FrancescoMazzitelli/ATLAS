@@ -153,16 +153,31 @@ class LocationGenerator:
             puma = str(population_df[population_df.agent_id == agent_idx].PUMA.values[0])
             pumas.extend([puma] * n_departures)
 
-            # origin/destination, i indexes previous location
+            # Assign a coordinate to every stop in the tour up front. HOME, WORK
+            # and SCHOOL are anchors: sampled once per agent and reused for every
+            # visit. DISCRETIONARY (the else case) is sampled fresh at each stop.
+            # Reading stop coords by index below guarantees destination(i) ==
+            # origin(i+1), so the tour is spatially continuous.
             locations = agent["itinerary"]["locations"]
+            anchor_coords = {}
+            stop_coords = []
+            for label in locations:
+                if label in ("HOME", "WORK", "SCHOOL"):
+                    if label not in anchor_coords:
+                        anchor_coords[label] = _sample_by_location(label, puma, rng)
+                    stop_coords.append(anchor_coords[label])
+                else:
+                    stop_coords.append(_sample_by_location(label, puma, rng))
+
+            # origin/destination, i indexes previous location
             for i, destination in enumerate(locations[1:]):
                 # get origins and destinations
                 origin = locations[i]
                 origins.append(origin)
                 destinations.append(destination)
-                
-                o_x, o_y = _sample_by_location(origin, puma, rng)
-                d_x, d_y = _sample_by_location(destination, puma, rng)
+
+                o_x, o_y = stop_coords[i]
+                d_x, d_y = stop_coords[i + 1]
                 o_xs.append(o_x)
                 o_ys.append(o_y)
                 d_xs.append(d_x)
